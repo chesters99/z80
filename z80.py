@@ -7,6 +7,46 @@ from random import randint
 from collections import OrderedDict
 from micropython import const
 
+# address of MCP23S17
+CTRL_ADDR = const(0)
+ADDR_ADDR = const(1)
+DATA_ADDR = const(2)
+
+# control bus pins from ctrl MCP23S17
+BUSRQ = const(0xFF)
+BUSAK = const(0xFF)
+WAIT  = const(0xFF)
+M1    = const(0xFF)
+MREQ  = const(0xFF)
+IOREQ = const(0xFF)
+WR    = const(0xFF)
+RD    = const(0xFF)
+RESET = const(0xFF)
+INT   = const(0xFF)
+NMI   = const(0xFF)
+HALT  = const(0xFF)
+TX    = const(0xFF)
+RX    = const(0xFF)
+TX2   = const(0xFF)
+RX2   = const(0xFF)
+
+# control bus pins from data MCP23S17
+USER1 = const(0xFF)
+USER2 = const(0xFF)
+USER3 = const(0xFF)
+USER4 = const(0xFF)
+USER5 = const(0xFF)
+USER6 = const(0xFF)
+USER7 = const(0xFF)
+USER8 = const(0xFF)
+
+
+
+
+
+
+
+
 
 class MCP23S17:
     def __init__(self, qwe):
@@ -16,14 +56,14 @@ class MCP23S17:
 
 class Buscontrol:
     def __init__(self, debug):
-        self.ctrl = MCP23S17(0)
+        self.ctrl = MCP23S17(CTRL_ADDR)
         self.addr = MCP23S17(1)
         self.data = MCP23S17(2)
         self.debug = debug
         if debug:
             print('debug mode on')
         # TODO
-        
+         
     def read_loc(self, address):
         # TODO
         return randint(0, 255)
@@ -75,6 +115,14 @@ def write_mem(options):
         bus.write_loc(start_address+i, value)
         print('0x{:02X} '.format(value), end='')
     print()
+
+def read_ctrl(options):
+    // TODO reads entire control bus
+    pass
+
+def set_ctrl(options):
+    // TODO write one bit to the control bus
+    pass
 
 def reset(options):
     if len(options) == 0 or len(options) > 1 or options[0] !='confirm':
