@@ -2,52 +2,44 @@
 # Graham Chester Jan-2023
 
 import sys, re
-#import buscontrol
-from random import randint
 from collections import OrderedDict
 from micropython import const
+#import buscontrol
 
-# address of MCP23S17
-CTRL_ADDR = const(0)
-ADDR_ADDR = const(1)
-DATA_ADDR = const(2)
+# MCP23S17 configuraton
+MCP23S17_bank = {
+    'ADDR_BUS_LO' :{'chip':0, 'bank':0, 'mask': 0b11111111},
+    'ADDR_BUS_HI' :{'chip':0, 'bank':1, 'mask': 0b11111111},
+    'DATA_BUS'    :{'chip':1, 'bank':0, 'mask': 0b11111111},
+    
+    'BUSRQ':{'chip':1, 'bank':1, 'mask': 0b00000001},
+    'BUSAK':{'chip':1, 'bank':1, 'mask': 0b00000010},
+    'WAIT' :{'chip':1, 'bank':1, 'mask': 0b00000100},
+    'M1'   :{'chip':1, 'bank':1, 'mask': 0b00001000},
+    'MREQ' :{'chip':1, 'bank':1, 'mask': 0b00010000},
+    'IOREQ':{'chip':1, 'bank':1, 'mask': 0b00100000},
+    'RD'   :{'chip':1, 'bank':1, 'mask': 0b01000000},
+    'WR'   :{'chip':1, 'bank':1, 'mask': 0b10000000},
+    
+    'RESET':{'chip':2, 'bank':0, 'mask': 0b00000001},
+    'INT'  :{'chip':2, 'bank':0, 'mask': 0b00000010},
+    'NMI'  :{'chip':2, 'bank':0, 'mask': 0b00000100},
+    'HALT' :{'chip':2, 'bank':0, 'mask': 0b00001000},
+    'TX'   :{'chip':2, 'bank':0, 'mask': 0b00010000},
+    'RX'   :{'chip':2, 'bank':0, 'mask': 0b00100000},
+    'TX2'  :{'chip':2, 'bank':0, 'mask': 0b01000000},
+    'RX2'  :{'chip':2, 'bank':0, 'mask': 0b10000000},
+    
+    'USER1':{'chip':2, 'bank':1, 'mask': 0b00000001},
+    'USER2':{'chip':2, 'bank':1, 'mask': 0b00000010},
+    'USER3':{'chip':2, 'bank':1, 'mask': 0b00000100},
+    'USER4':{'chip':2, 'bank':1, 'mask': 0b00001000},
+    'USER5':{'chip':2, 'bank':1, 'mask': 0b00010000},
+    'USER6':{'chip':2, 'bank':1, 'mask': 0b00100000},
+    'USER7':{'chip':2, 'bank':1, 'mask': 0b01000000},
+    'USER8':{'chip':2, 'bank':1, 'mask': 0b10000000},}
 
-# control bus pins from ctrl MCP23S17
-BUSRQ = const(0xFF)
-BUSAK = const(0xFF)
-WAIT  = const(0xFF)
-M1    = const(0xFF)
-MREQ  = const(0xFF)
-IOREQ = const(0xFF)
-WR    = const(0xFF)
-RD    = const(0xFF)
-RESET = const(0xFF)
-INT   = const(0xFF)
-NMI   = const(0xFF)
-HALT  = const(0xFF)
-TX    = const(0xFF)
-RX    = const(0xFF)
-TX2   = const(0xFF)
-RX2   = const(0xFF)
-
-# control bus pins from data MCP23S17
-USER1 = const(0xFF)
-USER2 = const(0xFF)
-USER3 = const(0xFF)
-USER4 = const(0xFF)
-USER5 = const(0xFF)
-USER6 = const(0xFF)
-USER7 = const(0xFF)
-USER8 = const(0xFF)
-
-
-
-
-
-
-
-
-
+    
 class MCP23S17:
     def __init__(self, qwe):
         # TODO
@@ -56,30 +48,33 @@ class MCP23S17:
 
 class Buscontrol:
     def __init__(self, debug):
-        self.ctrl = MCP23S17(CTRL_ADDR)
-        self.addr = MCP23S17(1)
-        self.data = MCP23S17(2)
         self.debug = debug
-        if debug:
-            print('debug mode on')
+        self.got_bus = False
         # TODO
          
     def read_loc(self, address):
         # TODO
+        from random import randint
         return randint(0, 255)
 
     def write_loc(self, address, data):
         # TODO
         pass
+    
     def reset_z80(self):
         # TODO
         pass
+    
+    def grab_bus(self, option):
+        # TODO
+        pass
+        
 
 
 
 def read_mem(options):
     if len(options) == 0:
-        raise ValueError("format is 'r' <start_address> <length (optional)>'")
+        raise ValueError("format is 'rd' <start_address> <length (optional)>'")
     start  = int(options[0])
     length = 1 if len(options) == 1 else int(options[1])
 
@@ -99,10 +94,11 @@ def read_mem(options):
                       ''.join([chr(val if 0x20 <= val <= 0x7E  else 0x2E) for val in data]) )
                 data = []
             
-
 def write_mem(options):
+    if not bus.got_bus:
+        bus.grab_bus()
     if len(options) < 2:
-        raise ValueError("format is 'w' <address> <byte> ...")
+        raise ValueError("format is 'wd' <address> <byte> ...")
     start_address = int(options[0])
     if start_address < 0 or start_address + len(options[1:]) > 65536:
         raise ValueError('address less than zero or address + data length > 655536')
@@ -115,13 +111,27 @@ def write_mem(options):
         bus.write_loc(start_address+i, value)
         print('0x{:02X} '.format(value), end='')
     print()
+    bus.release_bus()
+    
+def read_io(options):
+    if len(options) == 0:
+        raise ValueError("format is 'ri' <start_address> <length (optional)>'")
+    # TODO writes to Z80 IO device
+    pass
+
+def write_io(options):
+    if not bus.got_bus:
+        bus.grab_bus()
+    # TODO writes to Z80 IO device
+    bus.release_bus()
+    pass
 
 def read_ctrl(options):
-    // TODO reads entire control bus
+    # TODO reads entire control bus
     pass
 
 def set_ctrl(options):
-    // TODO write one bit to the control bus
+    # TODO write one bit to the control bus
     pass
 
 def reset(options):
@@ -137,16 +147,20 @@ def help(options):
 
 # Main Processing
 commands = OrderedDict({
-            'r': ['read from location X, Y bytes', read_mem, ],
-            'w': ['write  to location X, Y bytes', write_mem, ],
-            'z': ['Z80 wait mode', wait, ],
-            's': ['single step from address', single_step, ],
+            'rd': {'desc':'read from ',              'params': '<start_address> <num of bytes(optional)>', 'function': read_mem  },
+            'wd': {'desc':'write  to ',              'params': '<start_address> <value> ...',              'function': write_mem },
+            'ri': {'desc':'read i/o port',           'params': '<i/o address>',                            'function': read_io   },
+            'wi': {'desc':'write i/o port',          'params': '<i/o address> <data>...',                  'function': write_io  },
+            'z':  {'desc':'put z80 into wait state', 'params': 'no params',                                'function', wait_state},
+            's':  {'single step mode', single_step, ],
             'x': ['reset Z80',reset, ],
             'h': ['this help menu', help, ],
             'q': ['quit', sys.exit, ]})
 
 
 bus = Buscontrol(debug=False);
+if bus.debug:
+    print('debug mode on')
 
 while True:
     user_input = input('Enter command (h for help): ').lower().split()
