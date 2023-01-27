@@ -4,12 +4,14 @@ class Pin: # test harness class for debugging - to be deleted
     def __init__(self, pin, direction=0, debug=False):
         self.pin = pin
         self.debug = debug
+        self.val = 0
         if self.debug:
             print('DEBUG: CREATED PICO PIN {} WITH DIRECTION'.format(self.pin, direction))
 
     def value(self, val):
+        self.val = val
         if self.debug:
-            print('DEBUG: SET PICO PIN {} to VALUE {}'.format(self.pin, val))
+            print('DEBUG: SET PICO PIN {} to VALUE {}'.format(self.pin, self.val))
 
 class SPI: # test harness class for debugging - to be deleted
     MSB = const(1)
@@ -25,7 +27,7 @@ class SPI: # test harness class for debugging - to be deleted
         data = randint(0, 0xFF)
         if self.debug:
             print('DEBUG: SPI READ {:08b}'.format(data))
-        return 
+        return data
 
 
 
@@ -51,54 +53,56 @@ class MCP23S17s:
     INTCAPA  = const(0x10); INTCAPB  = const(0x11); GPIOA    = const(0x12); GPIOB    = const(0x13)
     OLATA    = const(0x14); OLATB    = const(0x15)
 
-    def __init__(self, spi, cs_pin, chips=3, debug=False):
+    def __init__(self, spi, cs_pin, debug=False):
         self.debug = debug
-        if self.debug:
-            print('DEBUG: mcp23s17 manager debug mode=on')
         self.spi = spi
         self.cs_pin  = cs_pin
-        for chip in range(chips): # configure i/o with HAEN enabled, and set IODIR to all bits in read mode
+        for chip in range(3): # configure i/o with HAEN enabled, and set IODIR to all bits in read mode
             spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IOCONA); spi.write(IOCON_DEFAULT)
             spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IOCONB); spi.write(IOCON_DEFAULT)
             spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IODIRA); spi.write(IODIR_READ)
             spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IODIRB); spi.write(IODIR_READ)
         self.cs_pin.value(INACTIVE)
+        if self.debug:
+            print('DEBUG: mcp23s17 manager debug mode=on, init complete')
  
     def read_bus(self, chip, bank, mask=None):
-        cs_pin.value(ACTIVE); 
-        spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IODIRA + bank); spi.write(IODIR_READ) # ensure IODIR is all read mode
-        spi.write(CTRL_BYTE | (chip <<1) | RD); spi.write(GPIOA  + bank); data = spi.read(bytes=1)
-        cs_pin.value(INACTIVE)
+        self.cs_pin.value(ACTIVE); 
+        self.spi.write(CTRL_BYTE | (chip <<1) | WR); self.spi.write(IODIRA + bank); self.spi.write(IODIR_READ) # ensure IODIR is all read mode
+        self.spi.write(CTRL_BYTE | (chip <<1) | RD); self.spi.write(GPIOA  + bank); data = self.spi.read(bytes=1)
+        self.cs_pin.value(INACTIVE)
         data = data & mask if mask else data
         if self.debug:
-            print('DEBUG: MCP23S17 RECV CHIP:{}, BANK:{}: VALUE:{:02x}, MASK:{08b} '.format(chip, bank, data, mask if mask else 0xFF))
+            print('DEBUG: MCP23S17 RECV CHIP:{}, BANK:{}: VALUE:{:02x}, MASK:{:08b} '.format(chip, bank, data, mask if mask else 0xFF))
         return data
 
     def write_bus(self, chip, bank, data, mask=IODIR_READ):
-        cs_pin.value(ACTIVE)
-        spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IODIRA + bank); spi.write(~mask)       # to write set IODIR to NOT of mask
-        spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(GPIOA  + bank); spi.write(data)        # write data
-        spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(IODIRA + bank); spi.write(IODIR_READ)  # put IODIR back to all read
-        cs_pin.value(INACTIVE)
+        self.cs_pin.value(ACTIVE)
+        self.spi.write(CTRL_BYTE | (chip <<1) | WR); self.spi.write(IODIRA + bank); self.spi.write(0b11111111-mask) # to write set IODIR to NOT of mask
+        self.spi.write(CTRL_BYTE | (chip <<1) | WR); self.spi.write(GPIOA  + bank); self.spi.write(data)            # write data
+        self.spi.write(CTRL_BYTE | (chip <<1) | WR); self.spi.write(IODIRA + bank); self.spi.write(IODIR_READ)      # put IODIR back to all read
+        self.cs_pin.value(INACTIVE)
         if self.debug:
-            print('DEBUG: MCP23S17 SEND CHIP:{}, BANK:{}: VALUE:{:02x}, MASK:{08b} '.format(chip, bank, data, mask))
+            print('DEBUG: MCP23S17 SEND CHIP:{}, BANK:{}: VALUE:{:02x}, MASK:{:08b} '.format(chip, bank, data, mask))
+
 
     def read_register(self, chip, register, mask=None):
-        cs_pin.value(ACTIVE)
-        spi.write(CTRL_BYTE | (chip <<1) | RD); spi.write(register); data = spi.read(bytes=1)
-        cs_pin.value(INACTIVE)
+        self.cs_pin.value(ACTIVE)
+        self.spi.write(CTRL_BYTE | (chip <<1) | RD); self.spi.write(register); data = self.spi.read(bytes=1)
+        self.cs_pin.value(INACTIVE)
         data = data & mask if mask else data
         if self.debug:
-            print('DEBUG: MCP23S17 READ REGISTER CHIP:{}: REG:{}, VALUE:{:08b}, MASK:{08b}'.format(chip, register, data, mask if mask else 0xFF))
+            print('DEBUG: MCP23S17 READ REGISTER CHIP:{}: REG:{}, VALUE:{:08b}, MASK:{:08b}'.format(chip, register, data, mask if mask else 0xFF))
         return data
 
     def write_register(self, chip, register, data, mask=None):
         data = data & mask if mask else data
-        cs_pin.value(ACTIVE)
+        self.cs_pin.value(ACTIVE)
         if mask: # if setting bits in mask then need to read register first, then OR register value with data
-            spi.write(CTRL_BYTE | (chip <<1) | RD); spi.write(register); current = spi.read(bytes=1)   
+            self.spi.write(CTRL_BYTE | (chip <<1) | RD); self.spi.write(register); current = self.spi.read(bytes=1)   
             data = current | data
-        spi.write(CTRL_BYTE | (chip <<1) | WR); spi.write(register); spi.write(data)
-        cs_pin.value(INACTIVE)
+        self.spi.write(CTRL_BYTE | (chip <<1) | WR); self.spi.write(register); self.spi.write(data)
+        self.cs_pin.value(INACTIVE)
         if self.debug:
-            print('DEBUG: MCP23S17 WRITE REGISTER CHIP:{}: REG:{}, VALUE:{:08b}, MASK:{08b}'.format(chip, register, data, mask if mask else 0xFF))
+            print('DEBUG: MCP23S17 WRITE REGISTER CHIP:{}: REG:{}, VALUE:{:08b}, MASK:{:08b}'.format(chip, register, data, mask if mask else 0xFF))
+

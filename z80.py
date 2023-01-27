@@ -8,7 +8,7 @@
 import sys
 from collections import OrderedDict
 from micropython import const
-from mcp23s17 import Pin, SPI 
+from mcp23s17_manager import Pin, SPI 
 from bus_manager import BusManager
 
 SPI_PORT        = const(1)
@@ -21,25 +21,24 @@ SPI_BAUDRATE    = const(1000000)
 # start main functions
 def read_memory(command, options): # suspend Z80 and read from Z80 memory
     if len(options) not in (1,2):
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     start_address  = int(options[0])
     if start_address < 0 or start_address + len(options[1:]) > 0xFFFF:
         raise ValueError('address less than zero or > 65536')
     length = 1 if len(options) == 1 else int(options[1])
-
     bytes_per_line = const(16)
     mgr.bus_control('grab')
     if length < bytes_per_line: # print single column if not too much to dump else print 16 on a line
-        for i, address in enumerate(range(start_address, start+length)):
+        for i, address in enumerate(range(start_address, start_address+length)):
             val = mgr.read_memory(address)
             print("{:04X} {:02X} {:s}".format(start_address, val, chr(val if 0x20 <= val <= 0x7E  else 0x2E) ))
     else:
         data = []
         length = ((length + 15) & (-16)) # round bytes to display up to next multiple of 16
         for i,address in enumerate(range(start_address, start_address+length)):
-            data.append( mgr.read_address(start_address) )
+            data.append( mgr.read_memory(start_address) )
             if (i+1) % bytes_per_line == 0 and i > 0:                
-                print('{:04X} '.format(start + i-bytes_per_line+1),
+                print('{:04X} '.format(start_address + i-bytes_per_line+1),
                       ''.join(['{:02X} '.format(val) for val in data]),
                       ''.join([chr(val if 0x20 <= val <= 0x7E  else 0x2E) for val in data]) )
                 data = []
@@ -47,7 +46,7 @@ def read_memory(command, options): # suspend Z80 and read from Z80 memory
             
 def write_memory(command, options): # suspend Z80 and write to Z80 memory
     if len(options) < 2:
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     start_address = int(options[0])
     if start_address < 0 or start_address + len(options[1:]) > 0xFFFF:
         raise ValueError('address less than zero or address + data length > 0xFFFF')
@@ -65,18 +64,18 @@ def write_memory(command, options): # suspend Z80 and write to Z80 memory
     
 def read_io_device(command, options): # suspend Z80 and write to a z80 i/o device
     if len(options) != 1:
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     io_address = int(options[0])
     if not (0 <= io_address <= 255): 
         raise ValueError('i/o address less than zero > 255')
     mgr.bus_control('grab')
-    data = mgr.readio(io_address)
+    data = mgr.read_io(io_address)
     mgr.bus_control('release')
     print('Read i/o address {:02x}: {:2x}'.format(io_address, data))
 
 def write_io_device(command, options): # suspend Z80 and write to a z80 i/o device
     if len(options) != 2:
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     io_address = int(options[0])
     data       = int(options[1])
     mgr.bus_control('grab')
@@ -86,7 +85,7 @@ def write_io_device(command, options): # suspend Z80 and write to a z80 i/o devi
 
 def read_z80_bus(command, options): # sneaky read of a given bus without suspending z80
     if len(options) != 1 or options[0] not in ('addr','data','ctrl'):
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
 
     values = mgr.read_z80_bus(options[0])
     if options[0] == 'addr':
@@ -94,11 +93,13 @@ def read_z80_bus(command, options): # sneaky read of a given bus without suspend
     if options[0] == 'data':
         print('Address: {:02X}'.format(values))
     if options[0] == 'ctrl':
-        print(values)    
+        for key, value in values.items():
+            print('{}: {}'.format(key, value), end=', ')
+        print()   
 
 def single_step(command, options): # single step from a given address
     if len(options) != 1:
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     address = int(options[1])
 
     mgr.single_step('on', address)
@@ -110,16 +111,16 @@ def single_step(command, options): # single step from a given address
         print('{:04X}: {:02X} '.format(address, data))
     mgr.single_step('off')
 
-def reset_z80(command, options): # reset z80 
+def reset_z80(command, options): # reset z80
     if len(options) != 1 or options[0] !='confirm':
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     print('resetting z80')
     mgr.reset_z80()
 
 def wait_z80(command, options): # put z80 in/out of wait state so values from read_z80_bus are decent
-    if len(options) !=1 or option[0] not in ('on','off'):
-        raise ValueError('error: usage is '+command+' '+commands[commmand][params])
-    mgr.wait_z80(option[0])
+    if len(options) !=1 or options[0] not in ('on','off'):
+        raise ValueError('error: usage is '+command+' '+commands[command]['params'])
+    mgr.wait_z80(options[0])
     print('Z80 wait state now {}'.format(options[0]))
 
 def help_menu(command, options):
@@ -136,22 +137,28 @@ commands = OrderedDict({
     'rb': {'desc': 'read a bus',              'params': '<addr/data/ctrl>',                         'function': read_z80_bus    },
     'ss': {'desc': 'single step mode',        'params': '<start address>',                          'function': single_step     },
     'zw': {'desc': 'put z80 into wait state', 'params': '<on/off>',                                 'function': wait_z80        },
-    'zr': {'desc': 'reset/reboot Z80',        'params': '"confirm"',                                'function': reset_z80       },
+    'zr': {'desc': 'reset/reboot Z80',        'params': 'confirm',                                  'function': reset_z80       },
     'h':  {'desc': 'this help menu',          'params': 'no parameters',                            'function': help_menu       },
-    'q':  {'desc': 'quit program',            'params': 'no parameters',                            'function': sys.exit        }})
+    'q':  {'desc': 'quit program',            'params': 'no parameters',                            'function': None            }})
 
-cs_pin = Pin(SPI_CHIP_SELECT, Pin.OUT, debug=False)
+cs_pin = Pin(SPI_CHIP_SELECT, Pin.OUT, debug=True)
 spi = SPI(SPI_PORT, baudrate=SPI_BAUDRATE, polarity=1, phase=1, bits=8, firstbit=SPI.MSB, \
-                    sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO))
-mgr = BusManager(spi, cs_pin, debug=False);
+                    sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO), debug=True)
+mgr = BusManager(spi, cs_pin, debug=True);
 
 while True:
     user_input = input('Enter command (h for help): ').lower().split()
     command = user_input[0] if len(user_input) > 0 else None
-    if command not in commands:
+    if not command:
+        continue
+    elif command == 'q':
+        sys.exit()
+    elif command not in commands:
         print('invalid command, enter h for help')
         continue
-    function = commands[command]['function']
+    else:  
+        function = commands[command]['function']
+        
     try:
         function(command, user_input[1:])
     except ValueError as e:
