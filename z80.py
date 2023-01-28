@@ -5,7 +5,7 @@
 # BusManager class contains state and methods to perform functions such as reading from memory by calling mcp23s17_manager
 # mcp23s17_manager class contains state of the 3 bus transciever chips and calls Pico SPI bus functions to communicate
 
-import sys
+import sys, time
 from collections import OrderedDict
 from micropython import const
 from mcp23s17_manager import Pin, SPI 
@@ -115,7 +115,10 @@ def reset_z80(command, options): # reset z80
     if len(options) != 1 or options[0] !='confirm':
         raise ValueError('error: usage is '+command+' '+commands[command]['params'])
     print('resetting z80')
+
+    start = time.ticks_us()
     mgr.reset_z80()
+    end = time.ticks_us()
 
 def wait_z80(command, options): # put z80 in/out of wait state so values from read_z80_bus are decent
     if len(options) !=1 or options[0] not in ('on','off'):
@@ -139,11 +142,11 @@ commands = OrderedDict({
     'zw': {'desc': 'put z80 into wait state', 'params': '<on/off>',                                 'function': wait_z80        },
     'zr': {'desc': 'reset/reboot Z80',        'params': 'confirm',                                  'function': reset_z80       },
     'h':  {'desc': 'this help menu',          'params': 'no parameters',                            'function': help_menu       },
-    'q':  {'desc': 'quit program',            'params': 'no parameters',                            'function': None            }})
+    'q':  {'desc': 'quit program',            'params': 'no parameters',                            'function': sys.exit        }})
 
 cs_pin = Pin(SPI_CHIP_SELECT, Pin.OUT, debug=True)
 spi = SPI(SPI_PORT, baudrate=SPI_BAUDRATE, polarity=1, phase=1, bits=8, firstbit=SPI.MSB, \
-                    sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO), debug=True)
+                    sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO, pull=Pin.PULL_UP), debug=True)
 mgr = BusManager(spi, cs_pin, debug=True);
 
 while True:
@@ -151,15 +154,12 @@ while True:
     command = user_input[0] if len(user_input) > 0 else None
     if not command:
         continue
-    elif command == 'q':
-        sys.exit()
     elif command not in commands:
         print('invalid command, enter h for help')
         continue
-    else:  
-        function = commands[command]['function']
-        
+     
     try:
-        function(command, user_input[1:])
+        function = commands[command]['function']
+        function(command, user_input[1:]) if command != 'q' else function()
     except ValueError as e:
         print(e)
