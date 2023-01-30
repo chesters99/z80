@@ -36,9 +36,8 @@ class MCP23S17s:
         self.debug = debug
         if self.debug:
             print('DEBUG: mcp23s17 manager debug mode=on, init start')
-#         mcp_reset_pin = Pin(MCP_RESET_GPIO, Pin.OUT, value=INACTIVE) # pico was resetting mcps sometimes with glitchs
-#         mcp_reset_pin.value(ACTIVE)
-#         _ = Pin(MCP_RESET_GPIO, Pin.IN, pull=Pin.PULL_UP)
+        mcp_reset_pin = Pin(MCP_RESET_GPIO, Pin.OUT, value=INACTIVE) # pico was resetting mcps sometimes with glitchs
+        mcp_reset_pin.value(ACTIVE)
         self.cs_pin = Pin(SPI_CS_GPIO, Pin.OUT)
         self.spi = SPI(id=SPI_PORT, baudrate=SPI_BAUDRATE, polarity=0, phase=0, bits=8, firstbit=SPI.MSB, \
                                     sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO))
