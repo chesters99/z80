@@ -1,116 +1,117 @@
 from micropython import const
+import time
 from collections import OrderedDict
 from mcp23s17_manager import MCP23S17s
+from machine import Pin
 
 class BusManager:  
-    ACTIVE              = const(0) # Z80 ctrl lines are active low
-    INACTIVE            = const(1)
-    INACTIVE_ALL        = const(0b11111111)
-    ACTIVE_ALL          = const(0b00000000)
-
+    ACTIVE       = const(0) # Z80 ctrl lines are active low
+    INACTIVE     = const(1)
+    INACTIVE_ALL = const(0b11111111)
+    ACTIVE_ALL   = const(0b00000000)
+    
+    RESET_PIN    = const(26)
+    NMI_PIN      = const(27)
+    INT_PIN      = const(28)
+        
     # MCP23S17 ctrl line configuraton
     MCP = OrderedDict({
-        'ADDR_LO'  : {'addr':0, 'bank':0},
-        'ADDR_HI'  : {'addr':0, 'bank':1},
-        'DATA'     : {'addr':1, 'bank':0},
-        'DATA_CTRL': {'addr':1, 'bank':1}, # 8 control lines are on the data chip
-        'CTRL_LO'  : {'addr':2, 'bank':0},
-        'CTRL_HI'  : {'addr':2, 'bank':1},
+        'ADDR_LO' : {'addr':0, 'bank':0,'iodir': 0b11111111},
+        'ADDR_HI' : {'addr':0, 'bank':1,'iodir': 0b11111111},
+        'DATA'    : {'addr':1, 'bank':0,'iodir': 0b11111111},
+        'CTRL'    : {'addr':1, 'bank':1,'iodir': 0b11111111},
 
-        'BUSRQ': {'addr':1, 'bank':1, 'mask': 0b00000001},
-        'BUSAK': {'addr':1, 'bank':1, 'mask': 0b00000010},
-        'WAIT' : {'addr':1, 'bank':1, 'mask': 0b00000100},
-        'M1'   : {'addr':1, 'bank':1, 'mask': 0b00001000},
-        'MREQ' : {'addr':1, 'bank':1, 'mask': 0b00010000},
-        'IOREQ': {'addr':1, 'bank':1, 'mask': 0b00100000},
-        'RD'   : {'addr':1, 'bank':1, 'mask': 0b01000000},
-        'WR'   : {'addr':1, 'bank':1, 'mask': 0b10000000},
-        
-        'RESET': {'addr':2, 'bank':0, 'mask': 0b00000001},
-        'HALT' : {'addr':2, 'bank':0, 'mask': 0b00000010},
-        'INT'  : {'addr':2, 'bank':0, 'mask': 0b00000100},
-        'NMI'  : {'addr':2, 'bank':0, 'mask': 0b00001000},
-        'TX'   : {'addr':2, 'bank':0, 'mask': 0b00010000},
-        'RX'   : {'addr':2, 'bank':0, 'mask': 0b00100000},
-        'TX2'  : {'addr':2, 'bank':0, 'mask': 0b01000000},
-        'RX2'  : {'addr':2, 'bank':0, 'mask': 0b10000000},
-        
-        'USER1': {'addr':2, 'bank':1, 'mask': 0b00000001},
-        'USER2': {'addr':2, 'bank':1, 'mask': 0b00000010},
-        'USER3': {'addr':2, 'bank':1, 'mask': 0b00000100},
-        'USER4': {'addr':2, 'bank':1, 'mask': 0b00001000},
-        'USER5': {'addr':2, 'bank':1, 'mask': 0b00010000},
-        'USER6': {'addr':2, 'bank':1, 'mask': 0b00100000},
-        'USER7': {'addr':2, 'bank':1, 'mask': 0b01000000},
-        'USER8': {'addr':2, 'bank':1, 'mask': 0b10000000},})
+        'BUSRQ': {'addr':1, 'bank':1, 'iodir': 0b11111110},
+        'BUSAK': {'addr':1, 'bank':1, 'iodir': 0b11111101},
+        'WAIT' : {'addr':1, 'bank':1, 'iodir': 0b11111011},
+        'M1'   : {'addr':1, 'bank':1, 'iodir': 0b11110111},
+        'MREQ' : {'addr':1, 'bank':1, 'iodir': 0b11101111},
+        'IOREQ': {'addr':1, 'bank':1, 'iodir': 0b11011111},
+        'RD'   : {'addr':1, 'bank':1, 'iodir': 0b10111111},
+        'WR'   : {'addr':1, 'bank':1, 'iodir': 0b01111111},})
 
-    def __init__(self, spi, cs_pin, debug=False):
+
+    def __init__(self, debug=False):
         self.debug          = debug
         self.got_bus        = False
         self.wait_state     = False
         self.single_step    = False
-        self.mcp23s17s = MCP23S17s(spi=spi, cs_pin=cs_pin, debug=True)
+        self.mcp23s17s      = MCP23S17s(debug=debug)
         if self.debug:
             print('DEBUG: bus manager debug mode on')
 
     def bus_control(self, option):
         if option not in ('grab','release'):
             raise ValueError('Can only grab or release bus')
+        
         if option == 'grab':
             if self.got_bus:
                 print('Warning: cant grab bus as already grabbed, no action taken')
                 return
-            self.mcp23s17s.write_bus(self.MCP['BUSRQ']['addr'], self.MCP['BUSRQ']['bank'], self.ACTIVE_ALL, self.MCP['BUSRQ']['mask'])
-            while self.mcp23s17s.read_bus(self.MCP['BUSAK']['addr'], self.MCP['BUSAK']['bank']) & self.MCP['BUSAK']['mask'] == self.ACTIVE:
-                print('Warning: bus manager waiting on BUSAK from Z80')
-            self.got_bus = True
-            if self.debug:
-                print('DEBUG: bus manager grabbed Z80 bus')
-        elif option == 'release':
-            self.mcp23s17s.write_bus(self.MCP['BUSRQ']['addr'], self.MCP['BUSRQ']['bank'], self.INACTIVE_ALL, self.MCP['BUSRQ']['mask'])
+            self.mcp23s17s.write_bus(self.MCP['BUSRQ']['addr'], self.MCP['BUSRQ']['bank'], self.ACTIVE_ALL, self.MCP['BUSRQ']['iodir'])
             self.got_bus = False
-            if self.debug:
-                print('DEBUG: bus manager released Z80 bus')
+            for iteration in range(3):
+                data = self.mcp23s17s.read_bus(self.MCP['BUSAK']['addr'], self.MCP['BUSAK']['bank']) 
+                print('bing1 {:08b}'.format(data))
+                data = data & (0b11111111 - self.MCP['BUSAK']['iodir'])
+                print('bing2 {:08b}'.format(data))
+                if data == self.ACTIVE:
+                    self.got_bus = True
+                    break
+            
+        elif option == 'release':
+            self.mcp23s17s.write_bus(self.MCP['BUSRQ']['addr'], self.MCP['BUSRQ']['bank'], self.INACTIVE_ALL, self.MCP['BUSRQ']['iodir'])
+            self.got_bus = False
+        if self.debug:
+            print('DEBUG: bus manager {} Z80 bus'.format(option))
 
     def read_memory(self, address):
         if not self.got_bus:
-            raise RunTimeException('Trying to access bus without BUSAK high') # protect against program bugs
-        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF)
-        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], address >> 8)
-        self.mcp23s17s.write_bus(self.MCP['RD'     ]['addr'], self.MCP['RD'     ]['bank'], self.ACTIVE_ALL, self.MCP['RD'  ]['mask'])
-        self.mcp23s17s.write_bus(self.MCP['MREQ'   ]['addr'], self.MCP['MREQ'   ]['bank'], self.ACTIVE_ALL, self.MCP['MREQ']['mask'])
+            raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
+        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF, ACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], address >> 8,     ACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['RD'     ]['addr'], self.MCP['RD'     ]['bank'], self.ACTIVE_ALL, self.MCP['MREQ']['iodir'] & self.MCP['RD'  ]['iodir'])
         data = self.mcp23s17s.read_bus(self.MCP['DATA']['addr'], self.MCP['DATA']['bank'])
-        self.mcp23s17s.write_bus(self.MCP['MREQ'   ]['addr'], self.MCP['MREQ']['bank'], self.INACTIVE_ALL) # set all z80 control lines inactive
+        input('read memory - press enter to continue')
+        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], 0xFF, INACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], 0xFF, INACTIVE_ALL)
+        reset_mreq_rd = 0b11111111 - self.MCP['MREQ']['iodir'] & self.MCP['RD'  ]['iodir']
+        self.mcp23s17s.write_bus(self.MCP['MREQ'   ]['addr'], self.MCP['MREQ']['bank'], reset_mreq_rd)
         return data
 
     def write_memory(self, address, data):
         if not self.got_bus:
-            raise RunTimeException('Trying to access bus without BUSAK high') # protect against program bugs
-        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF)
-        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], address >> 8)
-        self.mcp23s17s.write_bus(self.MCP['WR'  ]['addr'],    self.MCP['WR'  ]['bank'],  self.ACTIVE_ALL, self.MCP['WR'  ]['mask'])
-        self.mcp23s17s.write_bus(self.MCP['IOREQ']['addr'],   self.MCP['IOREQ']['bank'], self.ACTIVE_ALL, self.MCP['IOREQ']['mask'])
-        self.mcp23s17s.write_bus(self.MCP['DATA']['addr'],    self.MCP['DATA']['bank'], data)
-        self.mcp23s17s.write_bus(self.MCP['IOREQ']['addr'],   self.MCP['IOREQ']['bank'], self.INACTIVE_ALL) # set all z80 bus control lines inactive
+            raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
+        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF, ACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], address >> 8,     ACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['WR'     ]['addr'], self.MCP['WR'     ]['bank'],  self.ACTIVE_ALL, self.MCP['MREQ']['iodir'] & self.MCP['WR'  ]['iodir'])
+        self.mcp23s17s.write_bus(self.MCP['DATA'   ]['addr'], self.MCP['DATA'   ]['bank'], data,     ACTIVE_ALL)
+        input('read memory - press enter to continue')
+        reset_mreq_rd = 0b11111111 - self.MCP['MREQ']['iodir'] & self.MCP['WR']['iodir']
+        self.mcp23s17s.write_bus(self.MCP['MREQ'   ]['addr'], self.MCP['MREQ'   ]['bank'], reset_mreq_rd)
+        self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], 0xFF, INACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['ADDR_HI']['addr'], self.MCP['ADDR_HI']['bank'], 0xFF, INACTIVE_ALL)
+        self.mcp23s17s.write_bus(self.MCP['DATA'   ]['addr'], self.MCP['DATA'   ]['bank'], 0xFF, INACTIVE_ALL)
+
 
     def read_io(self, address):
         if not self.got_bus:
-            raise RunTimeException('Trying to access bus without BUSAK high') # protect against program bugs
+            raise RuntimeError('Trying to access bus without BUSAK high') # protect against program bugs
         self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF)
-        self.mcp23s17s.write_bus(self.MCP['RD'     ]['addr'], self.MCP['RD'     ]['bank'],   ACTIVE_ALL, self.MCP['RD'  ]['mask'])
-        self.mcp23s17s.write_bus(self.MCP['IOREQ'   ]['addr'], self.MCP['IOREQ'   ]['bank'], ACTIVE_ALL, self.MCP['IOREQ']['mask'])
+        self.mcp23s17s.write_bus(self.MCP['RD'     ]['addr'], self.MCP['RD'     ]['bank'],  self.ACTIVE_ALL, self.MCP['IOREQ']['iodir'] & self.MCP['RD'   ]['iodir'])
         data = self.mcp23s17s.read_bus(self.MCP['DATA']['addr'], self.MCP['DATA']['bank'])
-        self.mcp23s17s.write_bus(self.MCP['IOREQ'   ]['addr'], self.MCP['IOREQ']['bank'], INACTIVE_ALL) # set all z80 control lines inactive
+        reset_ioreq_rd = 0b11111111 - self.MCP['IOREQ']['iodir'] & self.MCP['RD'  ]['iodir']
+        self.mcp23s17s.write_bus(self.MCP['IOREQ'   ]['addr'], self.MCP['IOREQ']['bank'], reset_ioreq_rd)
         return data
 
     def write_io(self, address, data):
         if not self.got_bus:
-            raise RunTimeException('Trying to access bus without BUSAK high') # protect against program bugs
+            raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
         self.mcp23s17s.write_bus(self.MCP['ADDR_LO']['addr'], self.MCP['ADDR_LO']['bank'], address & 0x00FF)
-        self.mcp23s17s.write_bus(self.MCP['WR'  ]['addr'], self.MCP['WR'  ]['bank'], ACTIVE_ALL, self.MCP['WR'  ]['mask'])
-        self.mcp23s17s.write_bus(self.MCP['MREQ']['addr'], self.MCP['MREQ']['bank'], ACTIVE_ALL, self.MCP['MREQ']['mask'])
+        self.mcp23s17s.write_bus(self.MCP['WR'  ]['addr'], self.MCP['WR'  ]['bank'], self.ACTIVE_ALL, self.MCP['IOREQ']['iodir'] & self.MCP['WR'  ]['iodir'])
         self.mcp23s17s.write_bus(self.MCP['DATA']['addr'], self.MCP['DATA']['bank'], data)
-        self.mcp23s17s.write_bus(self.MCP['MREQ']['addr'], self.MCP['MREQ']['bank'], INACTIVE_ALL) # set all z80 bus control lines inactive
+        reset_ioreq_wr = 0b11111111 - self.MCP['IOREQ']['iodir'] & self.MCP['RD'  ]['iodir']
+        self.mcp23s17s.write_bus(self.MCP['MREQ']['addr'], self.MCP['MREQ']['bank'], reset_ioreq_wr) # set all z80 bus control lines inactive
 
     def read_z80_bus(self, bus_name):
         if bus_name == 'addr':
@@ -123,8 +124,8 @@ class BusManager:
             return data
 
         if bus_name == 'ctrl':
-            lookup = {'{:d}_{:d}_{:d}'.format(x[1]['addr'], x[1]['bank'], 7-'{:08b}'.format(x[1]['mask']).find('1')): (x[0], x[1]['mask'])  
-                  for x in self.MCP.items() if 'ADDR' not in x[0] and 'DATA' not in x[0] and 'CTRL' not in x[0]} # build lookup dict like {chip_bank_signalbit: (signalname, mask), ...}
+            lookup = {'{:d}_{:d}_{:d}'.format(x[1]['addr'], x[1]['bank'], 7-'{:08b}'.format(x[1]['iodir']).find('1')): (x[0], x[1]['iodir'])  
+                  for x in self.MCP.items() if 'ADDR' not in x[0] and 'DATA' not in x[0] and 'CTRL' not in x[0]} # build lookup dict l{chip_bank_signalbit: (signalname, iodir), }
             signals = OrderedDict()
             for addr, bank in [(self.MCP['DATA_CTRL']['addr'], self.MCP['DATA_CTRL']['bank']), (self.MCP['CTRL_LO']['addr'], self.MCP['CTRL_LO']['bank']),
                                (self.MCP['CTRL_HI'  ]['addr'], self.MCP['CTRL_HI'  ]['bank'])]:
@@ -138,18 +139,21 @@ class BusManager:
  
     def wait_z80(self, option):
         if option == 'on':
-            self.mcp23s17s.write_bus(self.MCP['WAIT']['addr'], self.MCP['WAIT']['bank'], self.ACTIVE_ALL,   self.MCP['WAIT']['mask'])
+            self.mcp23s17s.write_bus(self.MCP['WAIT']['addr'], self.MCP['WAIT']['bank'], self.ACTIVE_ALL,   self.MCP['WAIT']['iodir'])
             self.wait_state = True
         if option == 'off':
-            self.mcp23s17s.write_bus(self.MCP['WAIT']['addr'], self.MCP['WAIT']['bank'], self.INACTIVE_ALL, self.MCP['WAIT']['mask'])
+            self.mcp23s17s.write_bus(self.MCP['WAIT']['addr'], self.MCP['WAIT']['bank'], self.INACTIVE_ALL, self.MCP['WAIT']['iodir'])
             self.wait_state = True
         
-    def reset_z80(self):
+    def ctrl_z80(self, option):
         if self.debug:
-            print('DEBUG: bus manager reset Z80 CHIP:{}, bank:{}, mask {:08b}'.format(
-                self.MCP['RESET']['addr'], self.MCP['RESET']['bank'], self.MCP['RESET']['mask']))
-        self.mcp23s17s.write_bus(self.MCP['RESET']['addr'], self.MCP['RESET']['bank'], self.ACTIVE_ALL,   self.MCP['RESET']['mask'])      
-        self.mcp23s17s.write_bus(self.MCP['RESET']['addr'], self.MCP['RESET']['bank'], self.INACTIVE_ALL, self.MCP['RESET']['mask'])
+            print('DEBUG: {} Z80'.format(option))
+        pin_map = {'reset': self.RESET_PIN, 'int': self.INT_PIN, 'nmi': self.NMI_PIN}
+        gpio = pin_map[option]
+        
+        pin = Pin(gpio, Pin.OUT, value=ACTIVE)
+        pin.value(INACTIVE)
+        _ = Pin(gpio, Pin.IN, pull=Pin.PULL_UP) # input mode with weak pullup
 
     
     def single_step(self, options):
