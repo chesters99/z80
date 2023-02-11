@@ -38,9 +38,9 @@ class BusManager:
         self.bus.write('ADDR_HI', address >> 8)
         self.bus.write('ADDR_LO', address &0x00FF)
         if request == 'io':
-            self.bus.write('RD,IOREQ', LO)
+            self.bus.write('RD-IOREQ', LO)
         else:
-            self.bus.write('RD,MREQ',  LO)
+            self.bus.write('RD-MREQ',  LO)
         data = self.bus.read('DATA')
         input('read {} - press enter to continue'.format(request))
         self.bus.tristate()
@@ -54,9 +54,9 @@ class BusManager:
         self.bus.write('ADDR_LO', address & 0x00FF)
         self.bus.write('DATA', data)
         if request == 'io':
-            self.bus.write('WR,IOREQ', LO)
+            self.bus.write('WR-IOREQ', LO)
         else:
-            self.bus.write('WR,MREQ',  LO)
+            self.bus.write('WR-MREQ',  LO)
         input('wrote {} - press enter to continue'.format(request))
         self.bus.tristate()
     

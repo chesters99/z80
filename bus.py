@@ -8,7 +8,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     HI            = const(1)
     CTRL_RD       = const(0b01000001) # format of control byte for read
     CTRL_WR       = const(0b01000000) # format of control byte for write
-    IOCON_DEFAULT = const(0b01101000) # enable mirror interrupts, disable seqential, enable HAEN
+    IOCON_DEFAULT = const(0b00101000) # enable mirror interrupts, disable seqential, enable HAEN
     IODIR_READ    = const(0b11111111)
 
     # Pico Pins & SPI
@@ -29,19 +29,23 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     OLATA    = const(0x14); OLATB    = const(0x15)
 
     LOOKUP = OrderedDict({
-        'ADDR_LO' : [0, 0, 0b00000000], # format chip, bank, iodir mask
-        'ADDR_HI' : [0, 1, 0b00000000],
-        'DATA'    : [1, 0, 0b00000000],
-        'CTRL'    : [1, 1, 0b00000000],
-        'BUSRQ'   : [1, 1, 0b11111110],
-        'BUSAK'   : [1, 1, 0b11111101],
-        'WAIT'    : [1, 1, 0b11111011],
-        'M1'      : [1, 1, 0b11110111],
-        'MREQ'    : [1, 1, 0b11101111],
-        'IOREQ'   : [1, 1, 0b11011111],
-        'RD'      : [1, 1, 0b10111111],
-        'WR'      : [1, 1, 0b01111111],
-        'RESET': 26, 'NMI':27, 'INT':28})
+        'ADDR_LO' : [0, 0, 0b11111111], # format chip, bank, iodir mask
+        'ADDR_HI' : [0, 1, 0b11111111],
+        'DATA'    : [1, 0, 0b11111111],
+        'CTRL'    : [1, 1, 0b11111111],
+        'BUSRQ'   : [1, 1, 0b00000001],
+        'BUSAK'   : [1, 1, 0b00000010],
+        'WAIT'    : [1, 1, 0b00000100],
+        'M1'      : [1, 1, 0b00001000],
+        'MREQ'    : [1, 1, 0b00010000],
+        'IOREQ'   : [1, 1, 0b00100000],
+        'RD'      : [1, 1, 0b01000000],
+        'WR'      : [1, 1, 0b10000000],
+        'RD-MREQ' : [1, 1, 0b01010000],
+        'WR-MREQ' : [1, 1, 0b10010000],
+        'RD-IOREQ': [1, 1, 0b01100000],
+        'WR-IOREQ': [1, 1, 0b10100000],
+        'RESET': 26, 'NMI':27, 'INT':28}) # simple pico signal pins
     
 
     def __init__(self, debug=False):
@@ -75,20 +79,15 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             if self.debug:
                 print('DEBUG: SET SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio))
         else:
-            iodir = IODIR_READ
-            signals = signal.split(',')
-            for signal in signals: # handle multiple signals e.g. 'WR,MREQ'
-                chip, bank, iodir1 = self.LOOKUP[signal]
-                iodir = iodir & iodir1
-                
+            chip, bank, iodir = self.LOOKUP[signal]                
             self.cs.value(LO)
             self.spi.write( bytes([CTRL_WR | (chip <<1), OLATA +bank, data]) )
             self.cs.value(HI)
             self.cs.value(LO)
-            self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, iodir]) )
+            self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, IODIR_READ - iodir]) )
             self.cs.value(HI)
             if self.debug:
-                print('DEBUG: WROTE MCP23S17 CHIP:{}, BANK:{}: VALUE:{:08b} IODIR:{:08b}'.format(chip, bank, data, iodir))
+                print('DEBUG: WROTE MCP23S17 CHIP:{}, BANK:{}: VALUE:{:08b} IODIR:{:08b}'.format(chip, bank, data, IODIR_READ - iodir))
 
     def read(self, signal):
         if signal in ('RESET', 'NMI','INT'):
@@ -110,9 +109,9 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA +bank]) )
             data = self.spi.read(1)
             self.cs.value(HI)
-            data = int.from_bytes(data, byteorder) & (0b11111111 - iodir)
+            data = int.from_bytes(data, byteorder) & (IODIR_READ - iodir)
             if self.debug:
-                print('DEBUG: READ MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}  VALUE:{:08b}, '.format(chip, bank, iodir, data))
+                print('DEBUG: READ MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}  VALUE:{:08b}, '.format(chip, bank, IODIR_READ - iodir, data))
         return data
 
     def tristate(self, bus_name=None):
