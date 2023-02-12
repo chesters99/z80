@@ -163,8 +163,9 @@ def z80_internet(user_input):
                 break
             
             try:
-                data = response.content.decode('utf-8')
-                data = data[data.find('<body') : data.find('</body')+len('</body>')]
+                data = response.text
+                data = data.replace('\r','').replace('\n','').replace('>', '>\r\n')
+#                 data = data[data.find('<body') : data.find('</body')+len('</body>')]
             except MemoryError as e:
                 print('Error: webpage too large to process, exiting')
                 uart.write('ERROR: webpage too large'+chr(26))
@@ -174,9 +175,9 @@ def z80_internet(user_input):
             for index in range(len(data) / chunk_size +1):
                 chunk = data[index*chunk_size: (index+1) *chunk_size]
                 uart.write(chunk)
-                time.sleep(0.006+0.001) # added safety margin 0.006 - logic analyser flow control test!!
+                time.sleep(0.05) # 0.0007 - logic analyser flow control test!!
                 
-            uart.write(chr(26))
+            uart.write(chr(26)) # to trigger z80 read from aux:
             print('Done!')
         except KeyboardInterrupt:
             print('exiting internet mode: ctrl-c pressed')
