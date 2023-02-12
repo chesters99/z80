@@ -131,7 +131,7 @@ def connect_uart():
 def z80_internet(user_input):
     uart = connect_uart()
     print(uart)
-    uart.write('  '+chr(26)) # bodge for stuck Z80 read
+    uart.write(chr(26)+chr(26)) # bodge for stuck read under CP/M
     
     print('Entering internet mode, waiting for z80 request, press ctrl-C to exit')
     try:
@@ -168,7 +168,7 @@ def z80_internet(user_input):
             except MemoryError as e:
                 print('Error: webpage too large to process, exiting')
                 uart.write('ERROR: webpage too large'+chr(26))
-                return
+                continue
             
             chunk_size = 20
             for index in range(len(data) / chunk_size +1):
