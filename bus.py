@@ -12,13 +12,13 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     IODIR_READ    = const(0b11111111)
 
     # Pico Pins & SPI
-    MCP_RESET    = const(22)
-    SPI_PORT     = const(1)
-    SPI_CS       = const(13)
-    SPI_SCK      = const(14)
-    SPI_MOSI     = const(15)
-    SPI_MISO     = const(12)
-    SPI_BAUDRATE = const(50000000) # 62 Mhz is max on breadboard
+    MCP_RESET    = const(15)
+    SPI_PORT     = const(0)
+    SPI_CS       = const(17)
+    SPI_SCK      = const(18)
+    SPI_MOSI     = const(19)
+    SPI_MISO     = const(16)
+    SPI_BAUDRATE = const(8000000) # 9 Mhz is max on breadboard
     
     # MCP23S17 registers (from microchip datasheet https://ww1.microchip.com/downloads/en/devicedoc/20001952c.pdf)
     IODIRA   = const(0x00); IODIRB   = const(0x01); IPOLA   = const(0x02); IPOLB   = const(0x03)
@@ -37,15 +37,16 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
         'BUSAK'   : [1, 1, 0b00000010],
         'WAIT'    : [1, 1, 0b00000100],
         'M1'      : [1, 1, 0b00001000],
-        'MREQ'    : [1, 1, 0b00010000],
-        'IOREQ'   : [1, 1, 0b00100000],
-        'RD'      : [1, 1, 0b01000000],
-        'WR'      : [1, 1, 0b10000000],
+#         'MREQ'    : [1, 1, 0b00010000],
+#         'IOREQ'   : [1, 1, 0b00100000],
+#         'RD'      : [1, 1, 0b01000000],
+#         'WR'      : [1, 1, 0b10000000],
+        'HALT'    : [1, 1, 0b00000000] # not yet configured
         'RD-MREQ' : [1, 1, 0b01010000],
         'WR-MREQ' : [1, 1, 0b10010000],
         'RD-IOREQ': [1, 1, 0b01100000],
         'WR-IOREQ': [1, 1, 0b10100000],
-        'RESET': 26, 'NMI':27, 'INT':28}) # simple pico signal pins
+        'RESET':7, 'NMI':6, 'INT':5}) # simple pico signal pins
     
 
     def __init__(self, debug=False):
@@ -97,11 +98,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             if self.debug:
                 print('DEBUG: READ SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio, data))
         else:
-            iodir = IODIR_READ
-            signals = signal.split(',')
-            for signal in signals: # handle multiple signals e.g. 'RD,MREQ'
-                chip, bank, iodir1 = self.LOOKUP[signal]
-                iodir = iodir & iodir1
+            chip, bank, iodir = self.LOOKUP[signal]
             self.cs.value(LO)
             self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, IODIR_READ]) )
             self.cs.value(HI)
@@ -109,9 +106,9 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA +bank]) )
             data = self.spi.read(1)
             self.cs.value(HI)
-            data = int.from_bytes(data, byteorder) & (IODIR_READ - iodir)
+            data = int.from_bytes(data, byteorder) & iodir 
             if self.debug:
-                print('DEBUG: READ MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}  VALUE:{:08b}, '.format(chip, bank, IODIR_READ - iodir, data))
+                print('DEBUG: READ MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}, DATA:{:08b}'.format(chip, bank, IODIR_READ, data))
         return data
 
     def tristate(self, bus_name=None):

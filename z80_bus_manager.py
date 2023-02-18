@@ -12,7 +12,7 @@ from micropython import const
 from bus_manager import BusManager
 from secrets import secrets
 
-z80_baudrate = const(115200)
+Z80_BAUDRATE = const(115200)
 
 # start main functions
 def read_memory(user_input): # suspend Z80 and read from Z80 memory
@@ -124,14 +124,14 @@ def connect_wlan():
     return ip
 
 def connect_uart():
-    uart = UART(1, baudrate=z80_baudrate, tx=Pin(8), rx=Pin(9), rts=Pin(7), cts=Pin(6), flow=UART.RTS | UART.CTS)
+    uart = UART(0, baudrate=Z80_BAUDRATE, tx=Pin(0), rx=Pin(1), rts=Pin(3), cts=Pin(2), flow=UART.RTS | UART.CTS)
     uart.init(bits=8, parity=None, stop=1)
     return uart
     
 def z80_internet(user_input):
     uart = connect_uart()
     print(uart)
-    uart.write(chr(26)+chr(26)) # bodge for stuck read under CP/M
+    uart.write(chr(26)+chr(26)) # in case z80 is stuck on prior read(aux)
     
     print('Entering internet mode, waiting for z80 request, press ctrl-C to exit')
     try:
