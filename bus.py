@@ -28,20 +28,19 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     INTCAPA  = const(0x10); INTCAPB  = const(0x11); GPIOA   = const(0x12); GPIOB   = const(0x13)
     OLATA    = const(0x14); OLATB    = const(0x15)
 
-    LOOKUP = OrderedDict({
-        'ADDR_LO' : [0, 0, 0b11111111], # format chip, bank, iodir mask
+    LOOKUP = OrderedDict({     # format chip, bank, iodir mask
+        'ADDR_LO' : [0, 0, 0b11111111], 
         'ADDR_HI' : [0, 1, 0b11111111],
         'DATA'    : [1, 0, 0b11111111],
         'CTRL'    : [1, 1, 0b11111111],
         'BUSRQ'   : [1, 1, 0b00000001],
         'BUSAK'   : [1, 1, 0b00000010],
-        'WAIT'    : [1, 1, 0b00000100],
+        'HALT'    : [1, 1, 0b00000100], # WAIT is connected to CTRL MCP23S17 INTB pin
         'M1'      : [1, 1, 0b00001000],
-#         'MREQ'    : [1, 1, 0b00010000],
-#         'IOREQ'   : [1, 1, 0b00100000],
-#         'RD'      : [1, 1, 0b01000000],
-#         'WR'      : [1, 1, 0b10000000],
-        'HALT'    : [1, 1, 0b00000000] # not yet configured
+        'MREQ'    : [1, 1, 0b00010000],
+        'IOREQ'   : [1, 1, 0b00100000],
+        'RD'      : [1, 1, 0b01000000],
+        'WR'      : [1, 1, 0b10000000],
         'RD-MREQ' : [1, 1, 0b01010000],
         'WR-MREQ' : [1, 1, 0b10010000],
         'RD-IOREQ': [1, 1, 0b01100000],
@@ -78,7 +77,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             input('doing {}'.format(signal))
             _ = Pin(gpio, Pin.IN, pull=Pin.PULL_UP) # input mode with weak pullup
             if self.debug:
-                print('DEBUG: SET SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio))
+                print('DEBUG: SET  SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio))
         else:
             chip, bank, iodir = self.LOOKUP[signal]                
             self.cs.value(LO)
@@ -108,7 +107,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             self.cs.value(HI)
             data = int.from_bytes(data, byteorder) & iodir 
             if self.debug:
-                print('DEBUG: READ MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}, DATA:{:08b}'.format(chip, bank, IODIR_READ, data))
+                print('DEBUG: READ  MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}, DATA:{:08b}'.format(chip, bank, IODIR_READ, data))
         return data
 
     def tristate(self, bus_name=None):
@@ -118,3 +117,18 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
             self.cs.value(LO)
             self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, IODIR_READ]) )
             self.cs.value(HI)
+
+    def interrupt(self, signal, action):
+        chip, bank, mask = self.LOOKUP[signal]
+        if action == 'on':
+            self.spi.write( bytes([CTRL_WR | (chip <<1), INTCONA +bank, mask]) )  # interrupt if signal changes
+            self.spi.write( bytes([CTRL_WR | (chip <<1), DEFVALA +bank, mask]) )  # from value mask
+            self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, mask]) )  # enable interrupt on mask signal
+        elif action == 'off':
+            self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, 0]) )     # disable interrupt
+        elif action == 'clear':
+            self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA + bank]) )         # clear interrupt
+            
+        if self.debug:
+            print('DEBUG: MCP23S17 INTERRUPT on {} set to {}'.format(signal, action))
+            

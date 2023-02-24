@@ -1,4 +1,5 @@
 from micropython import const
+from collections import OrderedDict
 import time
 from bus import BUS
 from machine import Pin
@@ -11,8 +12,6 @@ class BusManager:
     def __init__(self, debug=False):
         self.debug       = debug
         self.got_bus     = False
-        self.wait_state  = False
-        self.single_step = False
         self.bus         = BUS(debug=self.debug)
         if self.debug:
             print('DEBUG: bus manager debug mode on')
@@ -42,7 +41,8 @@ class BusManager:
         else:
             self.bus.write('RD-MREQ',  LO)
         data = self.bus.read('DATA')
-        input('read {} - press enter to continue'.format(request))
+        if self.debug:
+            input('DEBUG: read {} - press enter to continue'.format(request))
         self.bus.tristate()
         return data
         
@@ -57,7 +57,8 @@ class BusManager:
             self.bus.write('WR-IOREQ', LO)
         else:
             self.bus.write('WR-MREQ',  LO)
-        input('wrote {} - press enter to continue'.format(request))
+        if self.debug:
+            input('DEBUG: wrote {} - press enter to continue'.format(request))
         self.bus.tristate()
     
     def read_bus(self, bus_name):
@@ -69,29 +70,19 @@ class BusManager:
             return self.bus.read('DATA')
 
         if bus_name == 'ctrl':
-            lookup = {'{:d}_{:d}_{:d}'.format(x[1]['addr'], x[1]['bank'], 7-'{:08b}'.format(x[1]['iodir']).find('1')): (x[0], x[1]['iodir'])  
-                  for x in self.bus.LOOKUP.items() if x[0] not in ('RESET','NMI','INT') } # build lookup dict l{chip_bank_signalbit: (signalname, iodir), }
+            bus_value = self.bus.read('CTRL')
             signals = OrderedDict()
-            bus_value = self.bus.read('CTRL') 
-            for i in range(8):
-                lookup_key = '{:d}_{:d}_{:d}'.format(addr, bank, i)
-                signal_name = lookup[lookup_key][0]
-                signal_value = int (bus_value & lookup[lookup_key][1] > 0)
-                signals[signal_name] = signal_value
-            return signals # returns a dict of {signal: value, ....}
+            for signal in ('BUSRQ','BUSAK','HALT','M1','MREQ','IOREQ','RD','WR'):
+                signals[signal] = 0 if bus_value & self.bus.LOOKUP[signal][2] == 0 else 1
+            return signals
         
     def ctrl_z80(self, option):
         if self.debug:
             print('DEBUG: {} Z80'.format(option))
-        if option == 'WAITON':
-            self.bus.write('WAIT', LO)
-            self.wait_state = True
-        elif option == 'WAITOFF':
-            self.bus.write('WAIT', HI)
-            self.wait_state = False       
-        else:
-            gpio = self.bus.LOOKUP[option]
-            pin = Pin(gpio, Pin.OUT, value=LO)
-            input('doing {}'.format(option))
-            pin.value(HI)
-            _ = Pin(gpio, Pin.IN, pull=Pin.PULL_UP) # input mode with weak pullup
+
+        gpio = self.bus.LOOKUP[option]
+        pin = Pin(gpio, Pin.OUT, value=LO)
+        if self.debug:
+            input('DEBUG: doing {}'.format(option))
+        pin.value(HI)
+        _ = Pin(gpio, Pin.IN, pull=Pin.PULL_UP) # input mode with weak pullup

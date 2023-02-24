@@ -32,7 +32,7 @@ def read_memory(user_input): # suspend Z80 and read from Z80 memory
         data = []
         length = ((length + 15) & (-16)) # round bytes to display up to next multiple of 16
         for i,address in enumerate(range(start_address, start_address+length)):
-            data.append( mgr.read(start_address) )
+            data.append( mgr.read(address) )
             if (i+1) % bytes_per_line == 0 and i > 0:                
                 print('{:04X} '.format(start_address + i-bytes_per_line+1),
                       ''.join(['{:02X} '.format(val) for val in data]),
@@ -67,48 +67,55 @@ def read_io_device(user_input): # suspend Z80 and write to a z80 i/o device
     mgr.control('grab')
     data = mgr.read(io_address, request='io')
     mgr.control('release')
-    print('Read i/o address {:02x}: {:2x}'.format(io_address, data))
+    print('Read i/o address 0x{:02x}: 0x{:02x}'.format(io_address, data))
 
 def write_io_device(user_input): # suspend Z80 and write to a z80 i/o device
-    if len(user_input) != 3:
+    if len(user_input) < 3:
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
-    io_address, data = int(user_input[2]), nt(user_input[3])
+    io_address = int(user_input[1])
+    
     mgr.control('grab')
-    mgr.write(io_address, data, request='io')
+    print('Write i/o address 0x{:02x}: '.format(io_address))
+    for data in user_input[2:]:
+        mgr.write(io_address, int(data), request='io')
+        print('0x{:02X} '.format(int(data)), end='')
     mgr.control('release')
-    print('Wrote i/o address {:02x}: {:2x}'.format(io_address, data))
 
 def read_z80_bus(user_input): # sneaky read of a given bus without suspending z80
-    if len(user_input) != 2 or options[2] not in ('addr','data','ctrl'):
+    if len(user_input) != 2 or user_input[1] not in ('addr','data','ctrl'):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
 
-    values = mgr.read_z80_bus(user_input[1])
-    if options[0] == 'addr':
-        print('Address: {:04X}'.format(values))
-    if options[0] == 'data':
-        print('Address: {:02X}'.format(values))
-    if options[0] == 'ctrl':
+    values = mgr.read_bus(user_input[1])
+    if user_input[1] == 'addr':
+        print('Address: 0x{:04X}'.format(values))
+    if user_input[1] == 'data':
+        print('Address: 0x{:02X}'.format(values))
+    if user_input[1] == 'ctrl':
         for key, value in values.items():
             print('{}: {}'.format(key, value), end=', ')
         print()   
 
-def single_step(user_input): # single step from a given address
-    if len(user_input) != 2:
-        raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
-    address = int(user_input[2])
 
-    while true:
-        reply = input('press <enter> to step, q <enter> to exit single step')
+def single_step(user_input):
+    if len(user_input) != 1:
+        raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
+    
+    mgr.bus.interrupt('M1','on')    
+    while True:        
+        address = mgr.read_bus('addr')
+        data    = mgr.read_bus('data')
+        print('{:04X}: {:02X} '.format(address, data))
+        mgr.bus.interrupt('M1','clear')
+        reply = input('Press <enter> to step, q <enter> to exit single step: ')
         if reply.lower() == 'q':
             break
-        data, address = mgr.single_step()
-        print('{:04X}: {:02X} '.format(address, data))
-        
+    mgr.bus.interrupt('M1','off')
+            
 
 def ctrl_z80(user_input): 
-    if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi', 'waiton', 'waitoff'):
+    if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi'):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
-    print('{} z80'.format(user_input[1]))
+    print('{} Z80'.format(user_input[1]))
     mgr.ctrl_z80(user_input[1].upper())
 
 
@@ -120,7 +127,7 @@ def connect_wlan():
         print('Waiting for wlan connection ctrl-c to quit...')
         time.sleep(2)
     ip = wlan.ifconfig()[0]
-    print(f'connected to router: my ip={ip}')
+    print(f'Connected to router: my ip={ip}')
     return ip
 
 def connect_uart():
@@ -143,7 +150,7 @@ def z80_internet(user_input):
    
     while True: 
         try:
-            print('waiting for z80 request')
+            print('Waiting for z80 request')
             while True:
                 if uart.any():
                     url = uart.read()
@@ -152,11 +159,11 @@ def z80_internet(user_input):
                 else:
                     time.sleep(1)
                     
-            print('getting from internet:', url)
+            print('Getting from internet:', url)
             if not (url.startswith('https://') or url.startswith('http://')):
                 url = 'https://' + url
             response = urequests.get(url, timeout=5)
-            print('status=', response.status_code)
+            print('Status=', response.status_code)
             if response.status_code != 200:
                 print('Error {response.status_code}, waiting...')
                 uart.write(chr(26))
@@ -180,7 +187,7 @@ def z80_internet(user_input):
             uart.write(chr(26)) # to trigger z80 read from aux:
             print('Done!')
         except KeyboardInterrupt:
-            print('exiting internet mode: ctrl-c pressed')
+            print('Exiting internet mode: ctrl-c pressed')
             return
         
 def z80_print(user_input):
@@ -191,14 +198,14 @@ def z80_print(user_input):
     else:
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     print(f'Entering wifi printer mode printer {printer}, port {port}, press ctrl-C to exit')
-    
+    print('Trying to connect to printer...')
     uart = connect_uart()
     
     try: # connect to router
         _ = connect_wlan()
     except KeyboardInterrupt:
         machine.reset()
-        print('cant connect to router, exiting')
+        print('Cant connect to router, exiting')
         return
     
     try: # connect to printer
@@ -222,7 +229,7 @@ def z80_print(user_input):
         except KeyboardInterrupt:
             conn.write(chr(12)) # form feed to ensure print page is ejected
             conn.close()
-            print('exiting print mode: ctrl-c pressed')
+            print('Exiting print mode: ctrl-c pressed')
             return
 
 
@@ -238,8 +245,8 @@ commands = OrderedDict({
     'ri'  : {'desc': 'read i/o port',       'params': '<i/o port address>',                'function': read_io_device  },
     'wi'  : {'desc': 'write i/o port',      'params': '<i/o port address> <data>...',      'function': write_io_device },
     'rb'  : {'desc': 'read a bus',          'params': '<addr/data/ctrl>',                  'function': read_z80_bus    },
-    'ss'  : {'desc': 'single step mode',    'params': '<start address>',                   'function': single_step     },
-    'zc'  : {'desc': 'control Z80',         'params': '<reset/int/nmi/waiton/waitoff>',    'function': ctrl_z80        },
+    'ss'  : {'desc': 'single step mode',    'params': ': no parameters',                   'function': single_step     },
+    'zc'  : {'desc': 'control Z80',         'params': '<reset/int/nmi>',                   'function': ctrl_z80        },
     'zi'  : {'desc': 'z80 internet access', 'params': ': no parameters',                   'function': z80_internet    },
     'zp'  : {'desc': 'z80 printer link',    'params': ': no parameters',                   'function': z80_print       },
     'h'   : {'desc': 'this help menu',      'params': ': no parameters',                   'function': help_menu       },
