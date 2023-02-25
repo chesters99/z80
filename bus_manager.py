@@ -11,27 +11,32 @@ class BusManager:
 
     def __init__(self, debug=False):
         self.debug       = debug
-        self.got_bus     = False
         self.bus         = BUS(debug=self.debug)
         if self.debug:
             print('DEBUG: bus manager debug mode on')
 
     def control(self, option):
         if option == 'grab':
+            self.bus.got_bus = True
             self.bus.write('BUSRQ', LO)
-            self.got_bus = (self.bus.read('BUSAK') == self.LO)
-            if not self.got_bus:
-                raise RuntimeError('ERROR: Couldnt grab bus, Z80 not responding')               
+            if self.debug:
+                input('DEBUG: Requested bus')
+            self.bus.got_bus = (self.bus.read('BUSAK') == self.LO)
+            if not self.bus.got_bus:
+                self.bus.write('BUSRQ', HI)
+                raise RuntimeError('ERROR: Couldnt grab bus, Z80 not responding')
+            if self.debug:
+                input('DEBUG: Got bus')
         elif option == 'release':
+            self.bus.got_bus = False
             self.bus.write('BUSRQ', HI)
-            self.got_bus = False
         else:
             raise ValueError('Can only grab or release bus')
         if self.debug:
             print('DEBUG: bus manager {} Z80 bus'.format(option))
 
     def read(self, address, request='memory'):
-        if not self.got_bus:
+        if not self.bus.got_bus:
             raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
         signal = 'IOREQ' if request == 'io' else 'MREQ'
         self.bus.write('ADDR_HI', address >> 8)
@@ -40,15 +45,15 @@ class BusManager:
             self.bus.write('RD-IOREQ', LO)
         else:
             self.bus.write('RD-MREQ',  LO)
-        data = self.bus.read('DATA')
         if self.debug:
-            input('DEBUG: read {} - press enter to continue'.format(request))
+            input('DEBUG: about to read - press enter to continue'.format(request))            
+        data = self.bus.read('DATA')
         self.bus.tristate()
         return data
         
 
     def write(self, address, data, request='memory'):
-        if not self.got_bus:
+        if not self.bus.got_bus:
             raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
         self.bus.write('ADDR_HI', address >> 8)
         self.bus.write('ADDR_LO', address & 0x00FF)
