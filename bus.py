@@ -8,7 +8,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     HI            = const(1)
     CTRL_RD       = const(0b01000001) # format of control byte for read
     CTRL_WR       = const(0b01000000) # format of control byte for write
-    IOCON_DEFAULT = const(0b00101000) # disable sequential mode, enable HAEN
+    IOCON_DEFAULT = const(0b01101000) # disable sequential mode, enable HAEN, int polarity low
     IODIR_READ    = const(0b11111111)
 
     # Pico Pins & SPI
@@ -18,7 +18,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     SPI_SCK      = const(18)
     SPI_MOSI     = const(19)
     SPI_MISO     = const(16)
-    SPI_BAUDRATE = const(8000000) # 9 Mhz is max on breadboard
+    SPI_BAUDRATE = const(5000000) # 9 Mhz is max on breadboard
     
     # MCP23S17 registers (from microchip datasheet https://ww1.microchip.com/downloads/en/devicedoc/20001952c.pdf)
     IODIRA   = const(0x00); IODIRB   = const(0x01); IPOLA   = const(0x02); IPOLB   = const(0x03)
@@ -56,20 +56,22 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
         for pin in (self.LOOKUP['RESET'], self.LOOKUP['NMI'], self.LOOKUP['INT']) :
             _ = Pin(pin, Pin.IN, pull=Pin.PULL_UP) # Put Z80 active low pins in input mode with weak pullup
 
-        mcp_reset = Pin(MCP_RESET, Pin.OUT, value=LO)
+        mcp_reset = Pin(MCP_RESET, Pin.OUT, value=HI)
+        mcp_reset.value(LO)
         mcp_reset.value(HI)
         
         self.cs = Pin(SPI_CS, Pin.OUT)
         self.spi = SPI(id=SPI_PORT, baudrate=SPI_BAUDRATE, polarity=0, phase=0, bits=8, firstbit=SPI.MSB, \
                                     sck=Pin(SPI_SCK), mosi=Pin(SPI_MOSI), miso=Pin(SPI_MISO))
         
-        # configure both chips with HAEN enabled, mirrored interrupts, seq disabled
+        # configure both chips with HAEN enabled, sequential disabled
         self.cs.value(LO)
         self.spi.write( bytes([CTRL_WR, IOCONA, IOCON_DEFAULT]) )
         self.cs.value(HI)
         self.cs.value(LO);
         self.spi.write( bytes([CTRL_WR, IOCONB, IOCON_DEFAULT]) )
         self.cs.value(HI)
+
 
     def write(self, signal, data=None):
         if signal in ('RESET', 'NMI', 'INT'):
@@ -82,7 +84,7 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
                 print('DEBUG: SET  SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio))
         else:
             chip, bank, iodir = self.LOOKUP[signal]
-            if self.got_bus: # if we have control of bus, dont drop BUSRQ
+            if chip == 1 and bank == 1 and self.got_bus: # if we have control of bus, dont drop BUSRQ
                 iodir = iodir | self.LOOKUP['BUSRQ'][2]
             self.cs.value(LO)
             self.spi.write( bytes([CTRL_WR | (chip <<1), OLATA +bank, data]) )
@@ -102,17 +104,19 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
                 print('DEBUG: READ SIGNAL:{} PIN:{}: VALUE:{:08b}'.format(signal, gpio, data))
         else:
             chip, bank, mask = self.LOOKUP[signal]
-            iodir = IODIR_READ if not self.got_bus else IODIR_READ - self.LOOKUP['BUSRQ'][2] # if we have control of bus, dont drop BUSRQ
-            self.cs.value(LO)
-            self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, iodir]) )
-            self.cs.value(HI)
+#             iodir = IODIR_READ
+#             if chip == 1 and bank == 1 and self.got_bus:
+#                 iodir = iodir - self.LOOKUP['BUSRQ'][2] # if we have control of bus, dont drop BUSRQ
+#             self.cs.value(LO)
+#             self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, iodir]) )
+#             self.cs.value(HI)
             self.cs.value(LO)
             self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA +bank]) )
             data = self.spi.read(1)
             self.cs.value(HI)
             data = int.from_bytes(data, byteorder) & mask 
             if self.debug:
-                print('DEBUG: READ  MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}, DATA:{:08b}'.format(chip, bank, iodir, data))
+                print('DEBUG: READ  MCP23S17 CHIP:{}, BANK:{}: IODIR:{:08b}, DATA:{:08b}'.format(chip, bank, mask, data))
         return data
 
     def tristate(self, bus_name=None):
@@ -126,13 +130,34 @@ class BUS: # Controller for 2x MCP23S17 chips and Pico GPIO line signals
     def interrupt(self, signal, action):
         chip, bank, mask = self.LOOKUP[signal]
         if action == 'on':
-            self.spi.write( bytes([CTRL_WR | (chip <<1), INTCONA +bank, mask]) )  # interrupt if signal changes
-            self.spi.write( bytes([CTRL_WR | (chip <<1), DEFVALA +bank, mask]) )  # from value mask
+#             self.cs.value(LO)
+#             self.spi.write( bytes([CTRL_WR | (chip <<1), INTCONA +bank, mask]) )  # interrupt if signal changes
+#             self.cs.value(HI)            
+#             self.cs.value(LO)
+#             self.spi.write( bytes([CTRL_WR | (chip <<1), DEFVALA +bank, mask]) )  # from value mask
+#             self.cs.value(HI)
+            self.cs.value(LO)
             self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, mask]) )  # enable interrupt on mask signal
+            self.cs.value(HI)
+            
+            if self.debug:
+                self.cs.value(LO)
+                self.spi.write( bytes([CTRL_RD | (chip <<1), IODIRA +bank]) )  # interrupt if signal changes
+                data = int.from_bytes(self.spi.read(1), byteorder)
+                print('IODIR {} {} {:08b} {} {:08b}'.format(chip, bank, mask, signal, data ))
+                self.cs.value(HI)
+            
+            
         elif action == 'off':
-            self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, 0]) )     # disable interrupt
+            self.cs.value(LO)
+            self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, 0]) )     # disable interrupts
+            self.cs.value(HI)
+                  
         elif action == 'clear':
+            self.cs.value(LO)
             self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA + bank]) )         # clear interrupt
+#             _ = self.spi.read(1)
+            self.cs.value(HI)
             
         if self.debug:
             print('DEBUG: MCP23S17 INTERRUPT on {} set to {}'.format(signal, action))

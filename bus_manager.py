@@ -19,21 +19,27 @@ class BusManager:
         if option == 'grab':
             self.bus.got_bus = True
             self.bus.write('BUSRQ', LO)
-            if self.debug:
-                input('DEBUG: Requested bus')
-            self.bus.got_bus = (self.bus.read('BUSAK') == self.LO)
-            if not self.bus.got_bus:
+#             if self.debug:
+#                 input('DEBUG: Requested bus')
+            if self.bus.read('BUSAK') == self.LO: # check if Z80 released busses
+                self.bus.write('ADDR_HI', HI) # stabilise busses to fixed value
+                self.bus.write('ADDR_LO', HI)
+                self.bus.write('CTRL', HI - self.bus.LOOKUP['BUSRQ'][2])
+                self.bus.tristate('DATA')     # make sure data bus can be used by memory
+            else:
+                self.bus.got_bus = False
                 self.bus.write('BUSRQ', HI)
+                self.bus.tristate()
                 raise RuntimeError('ERROR: Couldnt grab bus, Z80 not responding')
-            if self.debug:
-                input('DEBUG: Got bus')
+
         elif option == 'release':
             self.bus.got_bus = False
+            self.bus.tristate()
             self.bus.write('BUSRQ', HI)
         else:
             raise ValueError('Can only grab or release bus')
-        if self.debug:
-            print('DEBUG: bus manager {} Z80 bus'.format(option))
+#         if self.debug:
+#             print('DEBUG: bus manager {} Z80 bus'.format(option))
 
     def read(self, address, request='memory'):
         if not self.bus.got_bus:
