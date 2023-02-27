@@ -1,39 +1,34 @@
 # RC2014 (SC126) Z80 Bus Manager
 # Graham Chester Jan-2023
-# main program is menu options and functions to firstly validate user selections, secondly call bus manager functions, and finally output to user
-# BusManager class contains state and methods to perform functions such as reading from memory by calling BUS class methods
-# BUS class manages bus transciever chips and calls Pico SPI bus functions to communicate
+# main program is menu options and functions to validate user selections, then call bus manager functions, and then to output to user
+# BusManager class contains state and methods to interact with Pico, and MCP23S17 chips
 
 import sys, time
-import network, socket, urequests
-from machine import UART, Pin
 from collections import OrderedDict
 from micropython import const
 from bus_manager import BusManager
 from secrets import secrets
-
-Z80_BAUDRATE = const(115200)
 
 # start main functions
 def read_memory(user_input): # suspend Z80 and read from Z80 memory
     if len(user_input) not in (2, 3):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     start_address  = int(user_input[1])
+    length = 1 if len(user_input) == 2 else int(user_input[2])
     if start_address < 0 or start_address + len(user_input[2:]) > 65535:
         raise ValueError('address less than zero or > 65535')
-    length = 1 if len(user_input) == 2 else int(user_input[2])
-    bytes_per_line = const(16)
+
     mgr.control('grab')
-    if length < bytes_per_line: # print single column if not too much to dump else print 16 on a line
+    if length < 16: # print single column if not too much to dump else print 16 on a line
         for i, address in enumerate(range(start_address, start_address+length)):
-            val = mgr.read(address)
+            val = mgr.read(address, request='memory')
             print("{:04X} {:02X} {:s}".format(start_address, val, chr(val if 0x20 <= val <= 0x7E  else 0x2E) ))
     else:
         data = []
         length = ((length + 15) & (-16)) # round bytes to display up to next multiple of 16
         for i,address in enumerate(range(start_address, start_address+length)):
-            data.append( mgr.read(address) )
-            if (i+1) % bytes_per_line == 0 and i > 0:                
+            data.append( mgr.read(address, request='memory') )
+            if (i+1) % 16 == 0 and i > 0:                
                 print('{:04X} '.format(start_address + i-bytes_per_line+1),
                       ''.join(['{:02X} '.format(val) for val in data]),
                       ''.join([chr(val if 0x20 <= val <= 0x7E  else 0x2E) for val in data]) )
@@ -53,7 +48,7 @@ def write_memory(user_input): # suspend Z80 and write to Z80 memory
     mgr.control('grab')
     print('writing memory address 0x{:04X}: '.format(start_address), end='')
     for i, value in enumerate(data):
-        mgr.write(start_address+i, value)
+        mgr.write(start_address+i, value, request='memory')
         print('0x{:02X} '.format(value), end='')
     mgr.control('release')
     print()
@@ -81,70 +76,55 @@ def write_io_device(user_input): # suspend Z80 and write to a z80 i/o device
         print('0x{:02X} '.format(int(data)), end='')
     mgr.control('release')
 
-def read_z80_bus(user_input): # sneaky read of a given bus without suspending z80
-    if len(user_input) != 2 or user_input[1] not in ('addr','data','ctrl'):
-        raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
-
-    values = mgr.read_bus(user_input[1])
-    if user_input[1] == 'addr':
-        print('Address: 0x{:04X}'.format(values))
-    if user_input[1] == 'data':
-        print('Address: 0x{:02X}'.format(values))
-    if user_input[1] == 'ctrl':
-        for key, value in values.items():
-            print('{}: {}'.format(key, value), end=', ')
-        print()   
-
-
 def single_step(user_input):
     if len(user_input) != 1:
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     
-    mgr.bus.interrupt('M1','on')    
+    mgr.m1_interrupt('on')    
     while True:        
-        address = mgr.read_bus('addr')
-        data    = mgr.read_bus('data')
+        address = (mgr.read_bus('ADDR_H2') << 16) + (mgr.read_bus('ADDR_H1') << 8) + mgr.read_bus('ADDR_LO')
+        data    =  mgr.read_bus('data')
         print('{:04X}: {:02X} '.format(address, data))
-        mgr.bus.interrupt('M1','clear')
+        mgr.m1_interrupt('clear')
         reply = input('Press <enter> to step, q <enter> to exit single step: ')
         if reply.lower() == 'q':
             break
-    mgr.bus.interrupt('M1','off')
-            
+    mgr.m1_interrupt('off')
+    
+def read_z80_bus(user_input): # sneaky read of a given bus without suspending z80
+    if len(user_input) != 2 or user_input[1] not in ('addr','data','ctrl'):
+        raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
 
+    if user_input[1] == 'addr':
+        address = (mgr.read_bus('ADDR_H2') << 16) + (mgr.read_bus('ADDR_H1') << 8) + mgr.read_bus('ADDR_LO')
+        print('Address bus: 0x{:04X}'.format(address))
+    elif user_input[1] == 'data':
+        data = mgr.read_bus('DATA')
+        print('Data bus: 0x{:02X}'.format(data))
+    elif user_input[1] == 'ctrl':
+        print('Ctrl pins: ', end='')
+        for signal in ('BUSRQ','BUSAK','HALT','MREQ','IOREQ','RD','WR','RESET','NMI','INT'):
+            print('{}: {}'.format(signal,  mgr.read_signal(signal)), end=', ')
+        print()   
+    
 def ctrl_z80(user_input): 
     if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi'):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     print('{} Z80'.format(user_input[1]))
-    mgr.ctrl_z80(user_input[1].upper())
+    mgr.write_signal(user_input[1].upper(), HI)
+    mgr.write_signal(user_input[1].upper(), LO)
+    mgr.write_signal(user_input[1].upper(), HI)
 
 
-def connect_wlan():
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-    wlan.connect(secrets['ssid'], secrets['password'])
-    while wlan.isconnected() == False:
-        print('Waiting for wlan connection ctrl-c to quit...')
-        time.sleep(2)
-    ip = wlan.ifconfig()[0]
-    print(f'Connected to router: my ip={ip}')
-    return ip
-
-def connect_uart():
-    uart = UART(0, baudrate=Z80_BAUDRATE, tx=Pin(0), rx=Pin(1), rts=Pin(3), cts=Pin(2), flow=UART.RTS | UART.CTS)
-    uart.init(bits=8, parity=None, stop=1)
-    return uart
-    
 def z80_internet(user_input):
     uart = connect_uart()
     print(uart)
-    uart.write(chr(26)+chr(26)) # in case z80 is stuck on prior read(aux)
+    uart.write(chr(26)+chr(26)) # in case z80 is stuck on prior read from aux
     
     print('Entering internet mode, waiting for z80 request, press ctrl-C to exit')
     try:
         _ = connect_wlan()
     except KeyboardInterrupt:
-        machine.reset()
         print('Exiting internet mode: cant connect')
         return
    
@@ -172,7 +152,6 @@ def z80_internet(user_input):
             try:
                 data = response.text
                 data = data.replace('\r','').replace('\n','').replace('>', '>\r\n')
-#                 data = data[data.find('<body') : data.find('</body')+len('</body>')]
             except MemoryError as e:
                 print('Error: webpage too large to process, exiting')
                 uart.write('ERROR: webpage too large'+chr(26))
