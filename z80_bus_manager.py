@@ -1,7 +1,7 @@
-# RC2014 (SC126) Z80 Bus Manager
+# RC2014 (SC126) Z80 Bus Manager 
 # Graham Chester Jan-2023
 # main program is menu options and functions to validate user selections, then call bus manager functions, and then to output to user
-# BusManager class contains state and methods to interact with Pico, and MCP23S17 chips
+# BusManager class contains state and methods for interaction with Pico, and MCP23S17 chips
 
 import sys, time
 from collections import OrderedDict
@@ -83,7 +83,7 @@ def single_step(user_input):
     mgr.m1_interrupt('on')    
     while True:        
         address = (mgr.read_bus('ADDR_H2') << 16) + (mgr.read_bus('ADDR_H1') << 8) + mgr.read_bus('ADDR_LO')
-        data    =  mgr.read_bus('data')
+        data    =  mgr.read_bus('DATA')
         print('{:04X}: {:02X} '.format(address, data))
         mgr.m1_interrupt('clear')
         reply = input('Press <enter> to step, q <enter> to exit single step: ')
@@ -103,7 +103,7 @@ def read_z80_bus(user_input): # sneaky read of a given bus without suspending z8
         print('Data bus: 0x{:02X}'.format(data))
     elif user_input[1] == 'ctrl':
         print('Ctrl pins: ', end='')
-        for signal in ('BUSRQ','BUSAK','HALT','MREQ','IOREQ','RD','WR','RESET','NMI','INT'):
+        for signal in ('BUSRQ','BUSAK','HALT','MREQ','IORQ','RD','WR','RESET','NMI','INT'):
             print('{}: {}'.format(signal,  mgr.read_signal(signal)), end=', ')
         print()   
     
@@ -111,9 +111,9 @@ def ctrl_z80(user_input):
     if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi'):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     print('{} Z80'.format(user_input[1]))
-    mgr.write_signal(user_input[1].upper(), HI)
-    mgr.write_signal(user_input[1].upper(), LO)
-    mgr.write_signal(user_input[1].upper(), HI)
+    mgr.write_signal(user_input[1].upper(), 1)
+    mgr.write_signal(user_input[1].upper(), 0)
+    mgr.write_signal(user_input[1].upper(), 1)
 
 
 def z80_internet(user_input):
