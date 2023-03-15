@@ -8,6 +8,10 @@ from collections import OrderedDict
 from micropython import const
 from bus_manager import BusManager
 from secrets import secrets
+bytes_per_line = const(16)
+max_address    = const(1048576)
+PRINTER_IP     = const('192.168.1.8')
+PRINTER_PORT   = const(9100)
 
 # start main functions
 def read_memory(user_input): # suspend Z80 and read from Z80 memory
@@ -15,7 +19,7 @@ def read_memory(user_input): # suspend Z80 and read from Z80 memory
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     start_address  = int(user_input[1])
     length = 1 if len(user_input) == 2 else int(user_input[2])
-    if start_address < 0 or start_address + len(user_input[2:]) > 65535:
+    if start_address < 0 or start_address + len(user_input[2:]) > max_address-1:
         raise ValueError('address less than zero or > 65535')
 
     mgr.control('grab')
@@ -25,10 +29,10 @@ def read_memory(user_input): # suspend Z80 and read from Z80 memory
             print("{:04X} {:02X} {:s}".format(start_address, val, chr(val if 0x20 <= val <= 0x7E  else 0x2E) ))
     else:
         data = []
-        length = ((length + 15) & (-16)) # round bytes to display up to next multiple of 16
+        length = ((length + bytes_per_line-1) & (-bytes_per_line)) # round bytes to display up to next multiple of 16
         for i,address in enumerate(range(start_address, start_address+length)):
             data.append( mgr.read(address, request='memory') )
-            if (i+1) % 16 == 0 and i > 0:                
+            if (i+1) % bytes_per_line == 0 and i > 0:                
                 print('{:04X} '.format(start_address + i-bytes_per_line+1),
                       ''.join(['{:02X} '.format(val) for val in data]),
                       ''.join([chr(val if 0x20 <= val <= 0x7E  else 0x2E) for val in data]) )
@@ -39,8 +43,8 @@ def write_memory(user_input): # suspend Z80 and write to Z80 memory
     if len(user_input) < 3:
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     start_address = int(user_input[1])
-    if start_address < 0 or start_address + len(user_input[2:]) > 65536:
-        raise ValueError('address less than zero or address + data length > 65535')
+    if start_address < 0 or start_address + len(user_input[2:]) > max_address:
+        raise ValueError('address less than zero or address + data length > 0xffffff')
     data = [int(i) for i in user_input[2:]]
     if min(data) < 0 or max(data) > 255:
         raise ValueError('byte value outside 0 to 255')
@@ -76,20 +80,23 @@ def write_io_device(user_input): # suspend Z80 and write to a z80 i/o device
         print('0x{:02X} '.format(int(data)), end='')
     mgr.control('release')
 
+
 def single_step(user_input):
     if len(user_input) != 1:
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     
-    mgr.m1_interrupt('on')    
-    while True:        
-        address = (mgr.read_bus('ADDR_H2') << 16) + (mgr.read_bus('ADDR_H1') << 8) + mgr.read_bus('ADDR_LO')
+    mgr.m1_interrupt('enable')
+    while True:
+        mgr.m1_interrupt('hold_wait')
         data    =  mgr.read_bus('DATA')
-        print('{:04X}: {:02X} '.format(address, data))
-        mgr.m1_interrupt('clear')
+        address =  mgr.read_bus('ADDR_LO') + (mgr.read_bus('ADDR_H1') << 8)
+        address += (mgr.read_bus('ADDR_H2') << 16) # also clears interrupt
+        mgr.m1_interrupt('release_wait')
+        print('{:06X}: {:02X} '.format(address, data))
         reply = input('Press <enter> to step, q <enter> to exit single step: ')
         if reply.lower() == 'q':
             break
-    mgr.m1_interrupt('off')
+    mgr.m1_interrupt('disable')
     
 def read_z80_bus(user_input): # sneaky read of a given bus without suspending z80
     if len(user_input) != 2 or user_input[1] not in ('addr','data','ctrl'):
@@ -171,7 +178,7 @@ def z80_internet(user_input):
         
 def z80_print(user_input):
     if len(user_input) == 1:
-        printer, port = '192.168.1.218', 9100
+        printer, port = PRINTER_IP, PRINTER_PORT
     elif len(user_input) == 3:
         printer, port = user_input[1], user_input[2]
     else:
@@ -231,7 +238,8 @@ commands = OrderedDict({
     'h'   : {'desc': 'this help menu',      'params': ': no parameters',                   'function': help_menu       },
     'q'   : {'desc': 'quit program',        'params': ': no parameters',                   'function': sys.exit        }})
 
-mgr = BusManager(debug=True);
+debug = True
+mgr = BusManager(debug=debug);
 
 while True:
     user_input = input('Enter command (h for help): ').lower().split()

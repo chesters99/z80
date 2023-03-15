@@ -11,7 +11,7 @@ UART_RTS  = const(3) # Z80 serial port 2
 I2C0_SDA  = const(4) # i2c display (future)
 I2C0_SCL  = const(5) # i2c display (future)
 MCP_RESET = const(6) # reset mcp23S17 chips
-unused1   = const(7)
+unused1   = const(7) 
 unused2   = const(8)
 unused3   = const(9)
 unused4   = const(10)
@@ -34,7 +34,7 @@ Z80_RESET = const(28)
 # MCP23S17 & Z80 related constants
 Z80_BAUDRATE  = const(115200)
 SPI_PORT      = const(0)
-SPI_BAUDRATE  = const(5000000) # 9 Mhz is max on breadboard
+SPI_BAUDRATE  = const(1000000) # 3 Mhz is max on breadboard
 LO            = const(0)
 HI            = const(1)
 CTRL_RD       = const(0b01000001) # format of control byte for read
@@ -103,18 +103,24 @@ class BusManager:
         mcp_reset = Pin(MCP_RESET, Pin.OUT, value=HI)
         mcp_reset.value(LO)
         mcp_reset.value(HI)
+        _ = Pin(DIS_INT, Pin.OUT, value=HI) # WAIT is controlled by INTB
         
         self.cs  = Pin(SPI_CS, Pin.OUT)
         self.spi = SPI(id=SPI_PORT,baudrate=SPI_BAUDRATE,polarity=0,phase=0,bits=8,firstbit=SPI.MSB,sck=Pin(SPI_SCK),mosi=Pin(SPI_MOSI),miso=Pin(SPI_MISO))
         self.cs.value(LO); self.spi.write( bytes([CTRL_WR, IOCONA, IOCON_DEFAULT]) ); self.cs.value(HI) # enable HAEN, disable Sequential
-        self.tristate() # all busses in tristate with weak pull up
+        self.tristate() # all buses in tristate with weak pull up
+        print(self.spi)
 
 # -------------------------- methods to control mcp23s17 and Pico --------------------------
     def read_bus(self, bus):
         chip, bank = self.LOOKUP[bus]
         self.cs.value(LO); self.spi.write( bytes([CTRL_WR|(chip<<1), IODIRA+bank, IODIR_READ]) ); self.cs.value(HI)
+        if self.debug:
+            print('DEBUG: WROTE MCP23S17 BUS: {}, CHIP:{}, BANK:{}, IODIR:{:08b}'.format(bus, chip, bank, IODIR_READ))
         self.cs.value(LO); self.spi.write( bytes([CTRL_RD|(chip<<1), GPIOA+bank]) ); data = self.spi.read(1); self.cs.value(HI)
-        data = int.from_bytes(data, byteorder) if bus != 'ADDR_H2' else int.from_bytes(data, byteorder) & (IODIR_READ-ADDR_H2_MASK) # mask off non-address bits
+        data = int.from_bytes(data, byteorder)
+        if bus == 'ADDR_H2':
+            data = data >> 4 # shift off non-address bits
         if self.debug:
             print('DEBUG: READ MCP23S17 BUS {}, CHIP:{}, BANK:{}, DATA:{:08b}'.format(bus, chip, bank, data))
         return data
@@ -152,8 +158,8 @@ class BusManager:
         bus_names = [bus_name,] if bus_name else ('ADDR_H2','ADDR_H1','ADDR_LO', 'DATA')
         for bus_name in bus_names: # reset address and data busses to read mode (tristate) with weak pullup
             chip, bank = self.LOOKUP[bus_name]
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip <<1), GPPUA+bank, 0xFF]) );       self.cs.value(HI)
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip <<1), IODIRA+bank, IODIR_READ]) ); self.cs.value(HI)
+            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), GPPUA+bank, 0xFF]) );       self.cs.value(HI)
+            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), IODIRA+bank, IODIR_READ]) ); self.cs.value(HI)
 
         for _, value in self.LOOKUP.items(): # reset Z80 control signals to input mode with weak pullup
             if value[0] == 2:
@@ -161,20 +167,17 @@ class BusManager:
 
     def m1_interrupt(self, action):
         chip, bank, mask = self.LOOKUP['M1']
-        if action == 'on':
-#             self.cs.value(LO)
-#             self.spi.write( bytes([CTRL_WR | (chip <<1), INTCONA +bank, mask]) )  # interrupt if signal changes
-#             self.cs.value(HI)            
-#             self.cs.value(LO)
-#             self.spi.write( bytes([CTRL_WR | (chip <<1), DEFVALA +bank, mask]) )  # from value mask
-#             self.cs.value(HI)
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, mask]) ); self.cs.value(HI)  # enable interrupt on mask signal     
-        elif action == 'off':
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip <<1), GPINTENA+bank, 0]) ); self.cs.value(HI)     # disable interrupts
-        elif action == 'clear':
-            self.cs.value(LO); self.spi.write( bytes([CTRL_RD | (chip <<1), GPIOA + bank]) ); _ = self.spi.read(1); self.cs.value(HI) # clear interrupt  
+        if action == 'enable':
+
+            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), GPINTENA+bank, mask]) ); self.cs.value(HI)
+        elif action == 'disable':
+            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), GPINTENA+bank, 0   ]) ); self.cs.value(HI)
+        elif action == 'hold_wait':
+            _ = Pin(DIS_INT, Pin.OUT, value=LO) # keep WAIT held low
+        elif action == 'release_wait':
+            _ = Pin(DIS_INT, Pin.OUT, value=HI) # WAIT is controlled by INTB (fix for slow MCP23S17 being ready for new interrupt
         if self.debug:
-            print('DEBUG: MCP23S17 INTERRUPT set to {}: {} {} {}'.format(action, chip, bank, mask))
+            print('DEBUG: MCP23S17 INTERRUPT set to {}: {} {} {:08b}'.format(action, chip, bank, mask))
 
 
 # -------------------------- methods to control Z80 buses and signals --------------------------
@@ -194,12 +197,12 @@ class BusManager:
         if not self.got_bus:
             raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
         if request == 'io':
-            self.write_bus('ADDR_LO', address & 0x00FF) 
+            self.write_bus('ADDR_LO', address & 0xFF) 
             self.write_signal('IORQ_RD', LO)
         else:
             self.write_bus('ADDR_H2', address >> 16)
-            self.write_bus('ADDR_H1', address >> 8)
-            self.write_bus('ADDR_LO', address & 0x00FF) 
+            self.write_bus('ADDR_H1', (address >> 8) & 0xFF)
+            self.write_bus('ADDR_LO', address & 0xFF) 
             self.write_signal('MREQ_RD', LO)
         data = self.read_bus('DATA')
         return data
@@ -208,13 +211,13 @@ class BusManager:
         if not self.got_bus:
             raise RuntimeError('Trying to access bus without BUSAK low active') # protect against program bugs
         if request == 'io':
-            self.write_bus('ADDR_LO', address & 0x00FF)
+            self.write_bus('ADDR_LO', address & 0xFF)
             self.write_bus('DATA', data)
             self.write_signal('IORQ_WR', LO)
         else:
             self.write_bus('ADDR_H2', address >> 16)
-            self.write_bus('ADDR_H1', address >> 8)
-            self.write_bus('ADDR_LO', address & 0x00FF)
+            self.write_bus('ADDR_H1', (address >> 8) & 0xFF)
+            self.write_bus('ADDR_LO', address & 0xFF)
             self.write_bus('DATA', data)
             self.write_signal('MREQ_RD', LO)      
  
