@@ -80,23 +80,6 @@ def write_io_device(user_input): # suspend Z80 and write to a z80 i/o device
         print('0x{:02X} '.format(int(data)), end='')
     mgr.control('release')
 
-
-def single_step(user_input):
-    if len(user_input) != 1:
-        raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
-    
-    mgr.m1_interrupt('enable')
-    while True:
-        mgr.m1_interrupt('hold_wait')
-        data    =  mgr.read_bus('DATA')
-        address =  mgr.read_bus('ADDR_LO') + (mgr.read_bus('ADDR_H1') << 8)
-        address += (mgr.read_bus('ADDR_H2') << 16) # also clears interrupt
-        mgr.m1_interrupt('release_wait')
-        print('{:06X}: {:02X} '.format(address, data))
-        reply = input('Press <enter> to step, q <enter> to exit single step: ')
-        if reply.lower() == 'q':
-            break
-    mgr.m1_interrupt('disable')
     
 def read_z80_bus(user_input): # sneaky read of a given bus without suspending z80
     if len(user_input) != 2 or user_input[1] not in ('addr','data','ctrl'):
@@ -115,7 +98,7 @@ def read_z80_bus(user_input): # sneaky read of a given bus without suspending z8
         print()   
     
 def ctrl_z80(user_input): 
-    if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi'):
+    if len(user_input) != 2 or user_input[1] not in ('reset', 'int', 'nmi','wait'):
         raise ValueError('error: usage is '+user_input[0]+' '+commands[user_input[0]]['params'])
     print('{} Z80'.format(user_input[1]))
     mgr.write_signal(user_input[1].upper(), 1)

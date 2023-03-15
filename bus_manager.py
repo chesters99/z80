@@ -11,7 +11,7 @@ UART_RTS  = const(3) # Z80 serial port 2
 I2C0_SDA  = const(4) # i2c display (future)
 I2C0_SCL  = const(5) # i2c display (future)
 MCP_RESET = const(6) # reset mcp23S17 chips
-unused1   = const(7) 
+Z80_WAIT  = const(7) 
 unused2   = const(8)
 unused3   = const(9)
 unused4   = const(10)
@@ -88,6 +88,7 @@ class BusManager:
         'MREQ'    : [2, Z80_MREQ ],
         'INT'     : [2, Z80_INT  ],
         'RESET'   : [2, Z80_RESET],
+        'WAIT'    : [2, Z80_WAIT ],
         'MREQ_RD' : [3, (Z80_MREQ, Z80_RD)], # chip 3 is multiple Pico Z80 signals (for performance/convenience)
         'MREQ_WR' : [3, (Z80_MREQ, Z80_WR)],
         'IORQ_RD' : [3, (Z80_IORQ, Z80_RD)],
@@ -164,20 +165,6 @@ class BusManager:
         for _, value in self.LOOKUP.items(): # reset Z80 control signals to input mode with weak pullup
             if value[0] == 2:
                 _ = Pin(value[1], Pin.IN, pull=Pin.PULL_UP)
-
-    def m1_interrupt(self, action):
-        chip, bank, mask = self.LOOKUP['M1']
-        if action == 'enable':
-
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), GPINTENA+bank, mask]) ); self.cs.value(HI)
-        elif action == 'disable':
-            self.cs.value(LO); self.spi.write( bytes([CTRL_WR | (chip<<1), GPINTENA+bank, 0   ]) ); self.cs.value(HI)
-        elif action == 'hold_wait':
-            _ = Pin(DIS_INT, Pin.OUT, value=LO) # keep WAIT held low
-        elif action == 'release_wait':
-            _ = Pin(DIS_INT, Pin.OUT, value=HI) # WAIT is controlled by INTB (fix for slow MCP23S17 being ready for new interrupt
-        if self.debug:
-            print('DEBUG: MCP23S17 INTERRUPT set to {}: {} {} {:08b}'.format(action, chip, bank, mask))
 
 
 # -------------------------- methods to control Z80 buses and signals --------------------------
